@@ -1,12 +1,23 @@
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vitest/config';
 import { sveltekit } from '@sveltejs/kit/vite';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export default defineConfig({
 	plugins: [
 		tailwindcss(),
 		sveltekit()
 	],
+	resolve: {
+		alias: {
+			'convex/server': path.resolve(__dirname, './node_modules/convex/dist/esm/server/index.js'),
+			'convex/values': path.resolve(__dirname, './node_modules/convex/dist/esm/values/index.js')
+		}
+	},
 	server: {
 		fs: {
 			allow: ['../..']
