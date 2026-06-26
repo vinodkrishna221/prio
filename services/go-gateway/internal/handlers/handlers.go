@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -172,10 +173,11 @@ func (h *AuthHandler) HandleGoogleCallback(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	h.setSessionCookie(w, userId)
+	cookieValue := h.setSessionCookie(w, userId)
 
 	slog.Info("oauth authentication complete, redirecting to web client", "userId", userId)
-	http.Redirect(w, r, h.dashboardURL, http.StatusTemporaryRedirect)
+	redirectTarget := fmt.Sprintf("%s/auth/callback?session_id=%s", strings.TrimSuffix(h.dashboardURL, "/"), url.QueryEscape(cookieValue))
+	http.Redirect(w, r, redirectTarget, http.StatusTemporaryRedirect)
 }
 
 func (h *AuthHandler) fetchUserEmail(ctx context.Context, accessToken string) (string, error) {
@@ -209,7 +211,7 @@ func (h *AuthHandler) fetchUserEmail(ctx context.Context, accessToken string) (s
 	return info.Email, nil
 }
 
-func (h *AuthHandler) setSessionCookie(w http.ResponseWriter, userId string) {
+func (h *AuthHandler) setSessionCookie(w http.ResponseWriter, userId string) string {
 	expiration := time.Now().Add(24 * time.Hour)
 	expStr := strconv.FormatInt(expiration.Unix(), 10)
 
@@ -231,6 +233,7 @@ func (h *AuthHandler) setSessionCookie(w http.ResponseWriter, userId string) {
 	}
 
 	http.SetCookie(w, cookie)
+	return cookieValue
 }
 
 // VerifySession verifies the session cookie and extracts the Convex userId.
