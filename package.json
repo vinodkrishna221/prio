@@ -1,0 +1,10 @@
+{
+  "name": "last-minute-life-saver",
+  "private": true,
+  "dependencies": {
+    "convex": "^1.42.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

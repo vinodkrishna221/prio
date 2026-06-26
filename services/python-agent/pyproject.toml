@@ -1,0 +1,30 @@
+[project]
+name = "python-agent"
+version = "0.1.0"
+description = "LangGraph AI reasoning agent service for The Last-Minute Life Saver"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.1.0",
+    "google-cloud-aiplatform>=1.40.0",
+    "grpcio>=1.60.0",
+    "grpcio-tools>=1.60.0",
+    "grpcio-health-checking>=1.60.0",
+    "structlog>=24.1.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.28.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["agents"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80
