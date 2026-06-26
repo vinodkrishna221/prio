@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install protobuf tools
-RUN pip install --no-cache-dir grpcio-tools==1.60.0
+RUN pip install --no-cache-dir grpcio-tools==1.60.0 "setuptools<82"
 
 # Copy proto directory and agent codebase
 COPY proto/ /app/proto/
