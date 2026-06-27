@@ -37,6 +37,7 @@ func TestHandleGoogleLogin(t *testing.T) {
 		"deploy-key",
 		mockKMS,
 		cookieKey,
+		nil, // internalSecret — not needed for this test
 		nil,
 		nil,
 		nil,
@@ -70,11 +71,12 @@ func TestHandleGoogleCallback_Success(t *testing.T) {
 		"client-id",
 		"client-secret",
 		"http://localhost:8080/auth/callback",
-		"http://localhost:5173/dashboard",
+		"http://localhost:5173", // dashboardURL must be origin-only, no trailing /dashboard
 		convexURL,
 		"deploy-key",
 		mockKMS,
 		cookieKey,
+		nil, // internalSecret — not needed for this test
 		nil,
 		nil,
 		nil,
@@ -166,9 +168,11 @@ func TestHandleGoogleCallback_Success(t *testing.T) {
 		t.Errorf("expected status 307 redirect, got %d", resp.StatusCode)
 	}
 
+	// The callback now relays via the SvelteKit auth route with the signed
+	// session_id as a query parameter — it must not redirect straight to /dashboard.
 	location := resp.Header.Get("Location")
-	if location != "http://localhost:5173/dashboard" {
-		t.Errorf("expected redirect to dashboard URL, got %s", location)
+	if !strings.HasPrefix(location, "http://localhost:5173/auth/callback?session_id=") {
+		t.Errorf("expected relay redirect to /auth/callback?session_id=..., got %s", location)
 	}
 
 	// Verify session cookie is set
