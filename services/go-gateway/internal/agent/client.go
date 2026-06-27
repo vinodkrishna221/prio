@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 
 	schedulerv1 "github.com/lastminutelifesaver/gateway/gen/scheduler/v1"
 	triagev1 "github.com/lastminutelifesaver/gateway/gen/triage/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -41,7 +43,17 @@ func GetClient() (AgentClient, error) {
 			addr = "localhost:50051"
 		}
 		slog.Info("initializing gRPC connection to python reasoning agent", "addr", addr)
-		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+
+		// Use TLS for Cloud Run hosts (any non-localhost address).
+		// Cloud Run requires TLS; insecure is only safe for local dev.
+		var creds grpc.DialOption
+		if strings.HasPrefix(addr, "localhost") || strings.HasPrefix(addr, "127.0.0.1") {
+			creds = grpc.WithTransportCredentials(insecure.NewCredentials())
+		} else {
+			creds = grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, ""))
+		}
+
+		conn, err := grpc.NewClient(addr, creds)
 		if err != nil {
 			initErr = fmt.Errorf("agent/client: failed to create gRPC connection: %w", err)
 			return
