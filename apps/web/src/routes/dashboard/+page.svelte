@@ -6,8 +6,9 @@
 	import ActionCard from '$lib/components/cards/ActionCard.svelte';
 	import CalendarView from './CalendarView.svelte';
 
-	let { data } = $props<{ data: { user: { id: string } } }>();
+	let { data } = $props<{ data: { user: { id: string }; sseToken?: string } }>();
 	let userId = $derived(data.user?.id || '');
+	let sseToken = $derived(data.sseToken || '');
 
 	const gatewayUrl = env.PUBLIC_GATEWAY_URL || 'http://localhost:8080';
 
@@ -64,13 +65,12 @@
 		toasts = toasts.filter((t) => t.id !== id);
 	}
 
-	// Adjust Energy Score locally & sync back to Go Gateway
+	// Adjust Energy Score locally & sync back to Go Gateway via SvelteKit proxy
 	async function handleEnergyChange(newScore: number) {
 		energyScore = newScore;
 		try {
-			const res = await fetch(`${gatewayUrl}/api/user/energy-state`, {
+			const res = await fetch('/proxy/api/user/energy-state', {
 				method: 'POST',
-				credentials: 'include',
 				headers: {
 					'Content-Type': 'application/json'
 				},
@@ -84,18 +84,18 @@
 		}
 	}
 
-	// Trigger manual Google Tasks/Gmail Watch Sync
+	// Trigger manual Google Tasks/Gmail Watch Sync via SvelteKit proxy
 	async function triggerSync() {
 		if (isSyncing) return;
 		isSyncing = true;
 		syncMessage = 'Syncing Google Workspace...';
 		try {
-			// Trigger tasks sync
-			const resTasks = await fetch(`${gatewayUrl}/tasks/sync`, { method: 'POST', credentials: 'include' });
+			// Trigger tasks sync through the server-side proxy
+			const resTasks = await fetch('/proxy/tasks/sync', { method: 'POST' });
 			if (!resTasks.ok) throw new Error('Tasks sync failed');
 
 			// Trigger watch renew — may return a warning in dev (Pub/Sub topic not set up yet)
-			const resWatch = await fetch(`${gatewayUrl}/v1/users/me/watch`, { method: 'POST', credentials: 'include' });
+			const resWatch = await fetch('/proxy/v1/users/me/watch', { method: 'POST' });
 			if (!resWatch.ok) throw new Error('Gmail watch renewal failed');
 
 			addToast('Workspace Synced', 'Google Tasks and Gmail watches synchronized successfully.', 'success');
@@ -116,13 +116,16 @@
 	}
 
 	onMount(() => {
-		// Establish SSE stream connection to Go Gateway
-		const eventSourceUrl = `${gatewayUrl}/v1/events`;
-		
+		// Establish SSE stream connection directly to Go Gateway.
+		// In production the browser can't send the session cookie to a different domain,
+		// so we use a short-lived signed token (generated server-side in +page.server.ts)
+		// appended as ?token= instead. Falls back to cookie auth in local dev.
+		const sseUrl = sseToken
+			? `${gatewayUrl}/v1/events?token=${encodeURIComponent(sseToken)}`
+			: `${gatewayUrl}/v1/events`;
+
 		try {
-			// SvelteKit client will pass standard credentials on fetch, 
-			// EventSource doesn't support headers easily but supports cookies in same-origin/localhost.
-			sseSource = new EventSource(eventSourceUrl, { withCredentials: true });
+			sseSource = new EventSource(sseUrl, { withCredentials: !sseToken });
 
 			sseSource.onopen = () => {
 				sseConnected = true;

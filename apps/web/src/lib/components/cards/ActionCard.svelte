@@ -8,7 +8,9 @@
 		onExecuteSuccess?: (taskId: string) => void;
 	}>();
 
-	const gatewayUrl = env.PUBLIC_GATEWAY_URL || 'http://localhost:8080';
+	// Gateway calls go through the SvelteKit server-side proxy (/proxy/...) to avoid
+	// cross-domain cookie issues in production. PUBLIC_GATEWAY_URL is still needed
+	// for legacy reference but no longer used for direct fetch calls here.
 
 	let isExecuting = $state(false);
 	let isSuccess = $state(false);
@@ -83,9 +85,10 @@
 		errorMessage = '';
 
 		try {
-			const res = await fetch(`${gatewayUrl}/v1/tasks/${task._id}/execute`, {
+			// Route through the SvelteKit server-side proxy so the session cookie
+			// (on *.vercel.app) is never required on go-gateway's domain.
+			const res = await fetch(`/proxy/v1/tasks/${task._id}/execute`, {
 				method: 'POST',
-				credentials: 'include',
 				headers: {
 					'Content-Type': 'application/json'
 				}

@@ -136,6 +136,14 @@ func main() {
 		sessionSecretBytes = []byte(sessionSecret)
 	}
 
+	// 3a. Read INTERNAL_API_SECRET — shared between go-gateway and the SvelteKit proxy.
+	// All server-to-server calls from the SvelteKit backend include this value in the
+	// X-Internal-Auth header so go-gateway can identify them as trusted without a cookie.
+	internalSecret := []byte(os.Getenv("INTERNAL_API_SECRET"))
+	if len(internalSecret) == 0 {
+		slog.Warn("INTERNAL_API_SECRET is empty; SvelteKit proxy auth will be disabled (only session cookies accepted)")
+	}
+
 	// 4. Initialize Sub-services (gRPC client, Redis cache, SSE broker, Cloud Tasks dispatcher)
 	agentClient, err := agent.GetClient()
 	if err != nil {
@@ -184,6 +192,7 @@ func main() {
 		convexKey,
 		kmsService,
 		sessionSecretBytes,
+		internalSecret,
 		agentClient,
 		cacheManager,
 		sseBroker,

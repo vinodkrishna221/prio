@@ -42,17 +42,18 @@ var defaultScopes = []string{
 
 // AuthHandler coordinates Google OAuth 2.0 flows and Convex data persistence.
 type AuthHandler struct {
-	oauthConfig  *oauth2.Config
-	convex       *oauth.ConvexClient
-	kms          oauth.KMSService
-	cookieKey    []byte
-	dashboardURL string
+	oauthConfig    *oauth2.Config
+	convex         *oauth.ConvexClient
+	kms            oauth.KMSService
+	cookieKey      []byte
+	internalSecret []byte
+	dashboardURL   string
 
-	agentClient  agent.AgentClient
-	cache        cache.CalendarCache
-	broker       *sse.Broker
-	dispatcher   queue.TaskDispatcher
-	syncService  *workspace.SyncService
+	agentClient agent.AgentClient
+	cache       cache.CalendarCache
+	broker      *sse.Broker
+	dispatcher  queue.TaskDispatcher
+	syncService *workspace.SyncService
 }
 
 // NewAuthHandler creates an instance of AuthHandler.
@@ -60,6 +61,7 @@ func NewAuthHandler(
 	clientID, clientSecret, redirectURL, dashboardURL, convexURL, convexKey string,
 	kms oauth.KMSService,
 	cookieKey []byte,
+	internalSecret []byte,
 	agentClient agent.AgentClient,
 	cache cache.CalendarCache,
 	broker *sse.Broker,
@@ -74,16 +76,17 @@ func NewAuthHandler(
 		Endpoint:     google.Endpoint,
 	}
 	return &AuthHandler{
-		oauthConfig:  config,
-		convex:       oauth.NewConvexClient(convexURL, convexKey),
-		kms:          kms,
-		cookieKey:    cookieKey,
-		dashboardURL: dashboardURL,
-		agentClient:  agentClient,
-		cache:        cache,
-		broker:       broker,
-		dispatcher:   dispatcher,
-		syncService:  syncService,
+		oauthConfig:    config,
+		convex:         oauth.NewConvexClient(convexURL, convexKey),
+		kms:            kms,
+		cookieKey:      cookieKey,
+		internalSecret: internalSecret,
+		dashboardURL:   dashboardURL,
+		agentClient:    agentClient,
+		cache:          cache,
+		broker:         broker,
+		dispatcher:     dispatcher,
+		syncService:    syncService,
 	}
 }
 
@@ -270,6 +273,71 @@ func (h *AuthHandler) VerifySession(r *http.Request) (string, error) {
 	}
 
 	return userId, nil
+}
+
+// VerifyInternalRequest authenticates a server-to-server call from the SvelteKit proxy.
+// It checks the X-Internal-Auth header against the shared internal secret, and reads
+// the proxied user identity from X-User-Id.
+func (h *AuthHandler) VerifyInternalRequest(r *http.Request) (string, error) {
+	if len(h.internalSecret) == 0 {
+		return "", errors.New("handlers: internal secret not configured")
+	}
+	authHeader := r.Header.Get("X-Internal-Auth")
+	if authHeader == "" {
+		return "", errors.New("handlers: missing X-Internal-Auth header")
+	}
+	// Constant-time comparison to prevent timing attacks.
+	if !hmac.Equal([]byte(authHeader), h.internalSecret) {
+		return "", errors.New("handlers: invalid X-Internal-Auth header")
+	}
+	userId := r.Header.Get("X-User-Id")
+	if userId == "" {
+		return "", errors.New("handlers: missing X-User-Id header")
+	}
+	return userId, nil
+}
+
+// verifySSEToken validates a short-lived SSE bearer token issued by the SvelteKit server.
+// Token format: userId:expUnixSecs:hmac-sha256-base64url
+func (h *AuthHandler) verifySSEToken(token string) (string, error) {
+	if len(h.internalSecret) == 0 {
+		return "", errors.New("handlers: internal secret not configured")
+	}
+	parts := strings.Split(token, ":")
+	if len(parts) != 3 {
+		return "", errors.New("handlers: invalid SSE token format")
+	}
+	userId := parts[0]
+	expStr := parts[1]
+	sig := parts[2]
+
+	expUnix, err := strconv.ParseInt(expStr, 10, 64)
+	if err != nil {
+		return "", errors.New("handlers: invalid SSE token expiry")
+	}
+	if time.Now().Unix() > expUnix {
+		return "", errors.New("handlers: SSE token expired")
+	}
+
+	payload := userId + ":" + expStr
+	mac := hmac.New(sha256.New, h.internalSecret)
+	mac.Write([]byte(payload))
+	expectedSig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+
+	if !hmac.Equal([]byte(sig), []byte(expectedSig)) {
+		return "", errors.New("handlers: invalid SSE token signature")
+	}
+	return userId, nil
+}
+
+// verifyRequest authenticates a request via either internal proxy auth or session cookie.
+// Internal auth takes priority (used by SvelteKit server-side proxy in production).
+// Session cookie fallback supports local development where the cookie is same-origin.
+func (h *AuthHandler) verifyRequest(r *http.Request) (string, error) {
+	if userId, err := h.VerifyInternalRequest(r); err == nil {
+		return userId, nil
+	}
+	return h.VerifySession(r)
 }
 
 // validateOIDCToken parses and validates OIDC token against the expected audience.
@@ -513,7 +581,7 @@ func extractBodyText(part *gmail.MessagePart) string {
 // HandleGmailWatch sets up Gmail push notification watches for the user.
 func (h *AuthHandler) HandleGmailWatch(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userId, err := h.VerifySession(r)
+	userId, err := h.verifyRequest(r)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -585,7 +653,7 @@ func (h *AuthHandler) HandleGmailWatch(w http.ResponseWriter, r *http.Request) {
 // HandleTasksSync manually triggers the Google Tasks sync sequence.
 func (h *AuthHandler) HandleTasksSync(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userId, err := h.VerifySession(r)
+	userId, err := h.verifyRequest(r)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -692,9 +760,23 @@ func (h *AuthHandler) HandleTaskExecute(w http.ResponseWriter, r *http.Request) 
 }
 
 // HandleEventsStream establishes and handles persistent SSE streaming connections.
+// In production the browser connects directly to go-gateway (bypassing the SvelteKit
+// proxy to avoid Vercel serverless timeouts). Auth is via a short-lived signed token
+// passed as ?token= query param, generated server-side by SvelteKit. Falls back to
+// the session cookie for local development where the cookie is same-origin.
 func (h *AuthHandler) HandleEventsStream(w http.ResponseWriter, r *http.Request) {
-	userId, err := h.VerifySession(r)
+	var userId string
+	var err error
+
+	if token := r.URL.Query().Get("token"); token != "" {
+		// Production path: browser uses a short-lived token issued by SvelteKit server.
+		userId, err = h.verifySSEToken(token)
+	} else {
+		// Local dev path: browser cookie is same-origin with the Go server.
+		userId, err = h.VerifySession(r)
+	}
 	if err != nil {
+		slog.Warn("handlers: SSE connection rejected", "error", err)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -747,7 +829,7 @@ type EnergyStatePayload struct {
 // HandleEnergyState updates the biological score and logs it.
 func (h *AuthHandler) HandleEnergyState(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userId, err := h.VerifySession(r)
+	userId, err := h.verifyRequest(r)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -814,7 +896,7 @@ type Schedule struct {
 // HandleTaskExecuteCard processes execution calls for specific task cards.
 func (h *AuthHandler) HandleTaskExecuteCard(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userId, err := h.VerifySession(r)
+	userId, err := h.verifyRequest(r)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
