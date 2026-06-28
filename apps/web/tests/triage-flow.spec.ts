@@ -47,7 +47,7 @@ const mockSchedules = [
 	}
 ];
 
-test.describe('Last-Minute Life Saver E2E Triage & Execution Flow', () => {
+test.describe('prio E2E Triage & Execution Flow', () => {
 	test.beforeEach(async ({ context }) => {
 		const signedCookie = createSignedCookie('mock-user-id');
 		await context.addCookies([
@@ -81,7 +81,7 @@ test.describe('Last-Minute Life Saver E2E Triage & Execution Flow', () => {
 		await page.goto('/dashboard');
 
 		// Assert page loaded and renders title
-		await expect(page.locator('h1')).toContainText('Last-Minute Life Saver');
+		await expect(page.locator('h1')).toContainText('prio');
 
 		// Assert Task Queue contains our mock task card
 		await expect(page.getByRole('heading', { name: 'Review Q3 Client Agreement' })).toBeVisible();

@@ -234,15 +234,30 @@
 	<header class="sticky top-0 z-40 w-full border-b border-white/5 bg-brand-bg/85 backdrop-blur-md">
 		<div class="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
 			<div class="flex items-center gap-3">
-				<span class="text-2xl">⚡</span>
+				<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" class="h-9 w-9">
+					<defs>
+						<linearGradient id="header-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+							<stop offset="0%" stop-color="#818cf8" />
+							<stop offset="50%" stop-color="#6366f1" />
+							<stop offset="100%" stop-color="#3b82f6" />
+						</linearGradient>
+						<filter id="header-glow" x="-20%" y="-20%" width="140%" height="140%">
+							<feGaussianBlur stdDeviation="4" result="blur" />
+							<feComposite in="SourceGraphic" in2="blur" operator="over" />
+						</filter>
+					</defs>
+					<rect x="8" y="8" width="84" height="84" rx="24" fill="#090915" stroke="url(#header-grad)" stroke-width="1.5" stroke-opacity="0.25" />
+					<path d="M38 28h18c7.732 0 14 6.268 14 14s-6.268 14-14 14H44v20c0 1.105-.895 2-2 2h-2c-1.105 0-2-.895-2-2V30c0-1.105.895-2 2-2zm6 20h12c4.418 0 8-3.582 8-8s-3.582-8-8-8H44v16z" fill="url(#header-grad)" />
+					<path d="M49 38L37 54h13l-3 16 14-18H48l1-12z" fill="#38bdf8" filter="url(#header-glow)" opacity="0.9" />
+				</svg>
 				<div>
-					<h1 class="text-lg font-bold tracking-tight text-white font-heading">
-						Last-Minute Life Saver
+					<h1 class="text-xl font-black tracking-wider text-white font-heading leading-none">
+						prio<span class="text-brand-accent">.</span>
 					</h1>
-					<div class="flex items-center gap-1.5 mt-0.5">
+					<div class="flex items-center gap-1.5 mt-1">
 						<span class="h-1.5 w-1.5 rounded-full {sseConnected ? 'bg-brand-success animate-pulse' : 'bg-brand-urgent'}"></span>
-						<span class="text-[10px] text-brand-textMuted tracking-wider uppercase font-medium">
-							{sseConnected ? 'Connected' : 'Disconnected'}
+						<span class="text-[9px] text-brand-textMuted tracking-wider uppercase font-mono font-bold leading-none">
+							{sseConnected ? 'System Active' : 'Offline'}
 						</span>
 					</div>
 				</div>

@@ -16,14 +16,27 @@
 			<div class="absolute inset-0 bg-gradient-to-tr from-white/[0.02] to-transparent pointer-events-none"></div>
 			
 			<div class="text-center">
-				<div class="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-tr from-brand-accent to-brand-ambient p-0.5 shadow-lg shadow-brand-accent/20 mb-6">
-					<div class="flex h-full w-full items-center justify-center rounded-[14px] bg-[#0d0d1e] text-2xl font-bold text-white font-heading">
-						⚡
-					</div>
+				<div class="inline-flex h-16 w-16 items-center justify-center mb-6">
+					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" class="h-16 w-16 filter drop-shadow-[0_8px_16px_rgba(99,102,241,0.25)]">
+						<defs>
+							<linearGradient id="login-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+								<stop offset="0%" stop-color="#818cf8" />
+								<stop offset="50%" stop-color="#6366f1" />
+								<stop offset="100%" stop-color="#3b82f6" />
+							</linearGradient>
+							<filter id="login-glow" x="-20%" y="-20%" width="140%" height="140%">
+								<feGaussianBlur stdDeviation="4" result="blur" />
+								<feComposite in="SourceGraphic" in2="blur" operator="over" />
+							</filter>
+						</defs>
+						<rect x="8" y="8" width="84" height="84" rx="24" fill="#090915" stroke="url(#login-grad)" stroke-width="1.5" stroke-opacity="0.25" />
+						<path d="M38 28h18c7.732 0 14 6.268 14 14s-6.268 14-14 14H44v20c0 1.105-.895 2-2 2h-2c-1.105 0-2-.895-2-2V30c0-1.105.895-2 2-2zm6 20h12c4.418 0 8-3.582 8-8s-3.582-8-8-8H44v16z" fill="url(#login-grad)" />
+						<path d="M49 38L37 54h13l-3 16 14-18H48l1-12z" fill="#38bdf8" filter="url(#login-glow)" opacity="0.9" />
+					</svg>
 				</div>
 
-				<h1 class="text-3xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-200 to-slate-400 font-heading mb-3">
-					Last-Minute Life Saver
+				<h1 class="text-4xl font-black tracking-tight text-white font-heading mb-3">
+					prio<span class="text-transparent bg-clip-text bg-gradient-to-r from-brand-accent to-brand-ambient">.</span>
 				</h1>
 				<p class="text-sm text-brand-textMuted max-w-sm mx-auto mb-8 font-sans">
 					A context-aware, proactive AI companion that pre-carves focus blocks and compiles Workspace draft resolutions before deadline anxiety hits.
