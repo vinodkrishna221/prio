@@ -343,3 +343,81 @@ Options Considered: <List 2-3 possible solutions>
 Recommended: <Your recommended resolution>
 Needs PM approval: YES
 ```
+
+---
+
+## 11. Production Deployment Status & Known Incidents
+
+### ✅ Current Live Deployment (as of 2026-06-28)
+
+| Service | Platform | Revision | Status |
+| :--- | :--- | :--- | :--- |
+| `python-agent` | Cloud Run (`us-central1`) | `python-agent-00012-dkt` | ✅ Live — 100% traffic |
+| `go-gateway` | Cloud Run (`us-central1`) | — | ✅ Live |
+| `web` | Vercel | — | ✅ Live at `prio.xi.vercel.app` |
+| `convex` | Convex Cloud | — | ✅ Live |
+
+Deployment was executed manually using the steps in `DEPLOYMENT_GUIDE.md` (see §4 Cloud Run deployment section).
+
+---
+
+### 🐛 Incident: Malformed `GCP_PROJECT` Env Var → Hardcoded Email Fallback
+
+**Date:** 2026-06-28  
+**Severity:** HIGH — All AI-generated email drafts were silently replaced by a hardcoded fallback response.  
+**Affected Service:** `python-agent` (Cloud Run)
+
+#### Symptom
+Every email triage action produced the hardcoded body:
+> *"Thank you for your email. I will look into it."*
+
+instead of a Gemini-generated reply.
+
+#### Root Cause
+The Cloud Run env var `GCP_PROJECT` was set to the malformed string:
+```
+prio-500510 GCP_LOCATION=global GEMINI_MODEL=gemini-3.5-flash
+```
+instead of just `prio-500510`. This caused all three env vars to be collapsed into one value, so `os.environ.get("GCP_PROJECT")` returned the full corrupted string as the project ID. Every Vertex AI call then failed with:
+```
+403 PERMISSION_DENIED — Permission denied on resource project
+"prio-500510 GCP_LOCATION=global GEMINI_MODEL=gemini-3.5-flash"
+```
+The `except` block in `triage_agent_node()` caught this silently and wrote the hardcoded fallback to `draft_payload_json`.
+
+#### Fix Applied
+1. **Cloud Run env vars corrected** via `gcloud run services update`:
+   ```powershell
+   gcloud run services update python-agent --region=us-central1 `
+     --update-env-vars="GCP_PROJECT=prio-500510,GCP_LOCATION=global,GEMINI_MODEL=gemini-3.5-flash"
+   ```
+2. **`triage_agent.py` client init fixed** — changed `enterprise=True` (invalid kwarg) to `vertexai=True`:
+   ```python
+   # Before (broken)
+   _client = genai.Client(enterprise=True, project=project, location=location)
+   # After (correct)
+   _client = genai.Client(vertexai=True, project=project, location=location)
+   ```
+3. **Model default updated** in code (line 127 of `triage_agent.py`):
+   ```python
+   model_name = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
+   ```
+
+#### Critical Constraint: `gemini-3.5-flash` Endpoint Requirements
+> [!IMPORTANT]
+> `gemini-3.5-flash` is **only available on the `global` (multi-region/enterprise) Vertex AI endpoint**.  
+> It is **NOT available** on regional endpoints like `us-central1`.  
+> **Always** set `GCP_LOCATION=global` for this model. Never change it to a region.
+
+#### Prevention Rule for Agents
+- **Never** set multiple env vars inside a single `--set-env-vars` value string without proper quoting.
+- **Always** verify Cloud Run env vars post-deploy with:
+  ```powershell
+  gcloud run services describe python-agent --region=us-central1 `
+    --format="yaml(spec.template.spec.containers[0].env)"
+  ```
+- **Always** check Cloud Run logs after a deploy before declaring success:
+  ```powershell
+  gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=python-agent" `
+    --limit=20 --format="table(timestamp,jsonPayload)" --freshness=5m
+  ```

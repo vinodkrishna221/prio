@@ -1,0 +1,29 @@
+========================================================================
+TEST EMAIL 1: GMAIL DRAFT GENERATION (GMAIL_DRAFT)
+========================================================================
+
+Purpose:
+Tests if the system correctly detects a task requiring an email response,
+creates a reply draft in Gmail, and renders a 1-Tap Action Card with the
+draft response on the dashboard.
+
+------------------------------------------------------------------------
+SUBJECT:
+------------------------------------------------------------------------
+Urgent: Status update on Project Apollo presentation slides
+
+------------------------------------------------------------------------
+BODY:
+------------------------------------------------------------------------
+Hi there,
+
+Hope you are having a productive week.
+
+I wanted to quickly check in on the progress of the Project Apollo presentation slides. Are they ready for review? The client just emailed asking if we can share a draft copy by the end of today. 
+
+Please let me know if you need any help finishing them up, or if they are already uploaded to the shared folder.
+
+Best regards,
+Sarah Jenkins
+Project Lead | Apollo Tech Group
+sarah.jenkins@example.com

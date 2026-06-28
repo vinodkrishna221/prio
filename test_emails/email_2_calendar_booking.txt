@@ -1,0 +1,34 @@
+========================================================================
+TEST EMAIL 2: CALENDAR BOOKING GENERATION (CALENDAR_BOOKING)
+========================================================================
+
+Purpose:
+Tests if the system correctly detects a meeting request, schedules a 
+tentative "Ghost Block" calendar event on Google Calendar, and renders 
+a 1-Tap Calendar Booking Action Card on the dashboard.
+
+Note: Since this is processed live, the AI will schedule the slot 
+based on "Tomorrow" or the date mentioned relative to today.
+
+------------------------------------------------------------------------
+SUBJECT:
+------------------------------------------------------------------------
+Let's schedule: Project Apollo Architecture Review Sync
+
+------------------------------------------------------------------------
+BODY:
+------------------------------------------------------------------------
+Hi,
+
+We need to schedule a 30-minute sync to finalize the Project Apollo architecture. 
+
+Can we meet tomorrow at 3:15 PM - 3:45 PM to review the final details? Let's hop on a Google Meet. I'd like to invite David and Elena as well to make sure we are all aligned.
+
+Let me know if that time slot works for you.
+
+Best,
+Marcus Chen
+Technical Architect | Apollo Tech Group
+marcus.chen@example.com
+david.lee@example.com
+elena.rodriguez@example.com

@@ -37,6 +37,10 @@ export default defineSchema({
       })
     ),
     externalTaskId: v.optional(v.string()),
+    // Email send retry tracking — all optional so existing rows are unaffected
+    sendAttempts: v.optional(v.number()),   // how many times a GMAIL_DRAFT send has been attempted
+    lastError: v.optional(v.string()),       // last Gmail API error message
+    errorStatus: v.optional(v.string()),     // "SEND_FAILED" when permanently failed after max retries
   })
     .index("by_user", ["userId"])
     .index("by_user_status_priority", ["userId", "status", "priorityScore"])

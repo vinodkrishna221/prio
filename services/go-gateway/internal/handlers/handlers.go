@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"os"
 	"strconv"
@@ -428,8 +429,12 @@ func (h *AuthHandler) HandleGmailWebhook(w http.ResponseWriter, r *http.Request)
 		"email": watchPayload.EmailAddress,
 	}, &user)
 	if err != nil || user.ID == "" {
-		slog.Error("handlers: user not found for email", "email", watchPayload.EmailAddress)
-		w.WriteHeader(http.StatusNoContent)
+		// Return 200 OK to ACK the Pub/Sub message. If we return any non-2xx (or even
+		// some 2xx like 204 in some Pub/Sub configs) Google will retry the delivery
+		// indefinitely. An unknown email address will never belong to a user, so we
+		// must permanently drop it by returning 200.
+		slog.Warn("handlers: gmail webhook ignored — email address not registered", "email", watchPayload.EmailAddress)
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
@@ -447,7 +452,7 @@ func (h *AuthHandler) HandleGmailWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	msgList, err := gmailService.Users.Messages.List("me").MaxResults(1).Context(ctx).Do()
+	msgList, err := gmailService.Users.Messages.List("me").Q("-label:DRAFT -label:SENT").MaxResults(1).Context(ctx).Do()
 	if err != nil || len(msgList.Messages) == 0 {
 		slog.Error("handlers: failed to list user messages", "error", err)
 		w.WriteHeader(http.StatusNoContent)
@@ -455,6 +460,17 @@ func (h *AuthHandler) HandleGmailWebhook(w http.ResponseWriter, r *http.Request)
 	}
 	msgID := msgList.Messages[0].Id
 	threadID := msgList.Messages[0].ThreadId
+
+	var existingTask map[string]interface{}
+	err = h.convex.CallQuery(ctx, "queries:getTaskByExternalId", map[string]interface{}{
+		"userId":         user.ID,
+		"externalTaskId": msgID,
+	}, &existingTask)
+	if err == nil && existingTask != nil && existingTask["_id"] != nil {
+		slog.Info("handlers: message already triaged, skipping", "userId", user.ID, "messageId", msgID)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 
 	msg, err := gmailService.Users.Messages.Get("me", msgID).Format("full").Context(ctx).Do()
 	if err != nil {
@@ -542,6 +558,7 @@ func (h *AuthHandler) HandleGmailWebhook(w http.ResponseWriter, r *http.Request)
 		"durationMinutes": 15.0,
 		"dueAt":           float64(time.Now().Add(24 * time.Hour).UnixNano() / int64(time.Millisecond)),
 		"actionCard":      actionCard,
+		"externalTaskId":  msgID,
 	}, &newTaskId)
 	if err != nil {
 		slog.Error("handlers: failed to ingest task into database", "userId", user.ID, "error", err)
@@ -879,6 +896,10 @@ type Task struct {
 	DueAt           float64     `json:"dueAt"`
 	ActionCard      *ActionCard `json:"actionCard,omitempty"`
 	ExternalTaskID  string      `json:"externalTaskId,omitempty"`
+	// Email send retry tracking fields — mirror convex/schema.ts
+	SendAttempts int    `json:"sendAttempts,omitempty"`
+	LastError    string `json:"lastError,omitempty"`
+	ErrorStatus  string `json:"errorStatus,omitempty"`
 }
 
 // Schedule represents the schedule allocation document in Convex.
@@ -954,6 +975,63 @@ func (h *AuthHandler) HandleTaskExecuteCard(w http.ResponseWriter, r *http.Reque
 				return
 			}
 
+			// ── Retry Gate ────────────────────────────────────────────────────────────
+			// Max 3 send attempts. Once exhausted we permanently stop and surface an
+			// error in the dashboard instead of letting the user loop forever.
+			const maxSendAttempts = 3
+
+			if task.SendAttempts >= maxSendAttempts {
+				slog.Warn("handlers: gmail draft send blocked — max attempts reached",
+					"taskId", taskId,
+					"attempts", task.SendAttempts,
+				)
+				http.Error(w,
+					fmt.Sprintf("email send permanently failed after %d attempts: %s", maxSendAttempts, task.LastError),
+					http.StatusConflict, // 409 — caller should not retry
+				)
+				return
+			}
+
+			// ── Pre-flight: validate recipient email address ───────────────────────
+			// Parse the To: field from the AI payload. If the address is malformed
+			// (e.g., a hallucinated email) we skip the Gmail API call entirely and
+			// mark the task as permanently failed — it will never succeed.
+			var draftPayload struct {
+				To string `json:"to"`
+			}
+			_ = json.Unmarshal([]byte(task.ActionCard.PayloadJSON), &draftPayload)
+
+			if draftPayload.To != "" {
+				if _, parseErr := mail.ParseAddress(draftPayload.To); parseErr != nil {
+					slog.Error("handlers: gmail draft has invalid recipient address — marking permanently failed",
+						"taskId", taskId,
+						"to", draftPayload.To,
+						"error", parseErr,
+					)
+					errMsg := fmt.Sprintf("invalid recipient email address %q: %v", draftPayload.To, parseErr)
+					_ = h.convex.CallMutation(ctx, "mutations:recordTaskError", map[string]interface{}{
+						"taskId":       taskId,
+						"errorMessage": errMsg,
+						"sendAttempts": float64(task.SendAttempts),
+						"isFinal":      true,
+					}, nil)
+					h.broker.Broadcast(userId, sse.Event{
+						Type: "TASK_SEND_FAILED",
+						Data: map[string]interface{}{
+							"taskId":   taskId,
+							"title":    task.Title,
+							"error":    errMsg,
+							"attempts": task.SendAttempts,
+						},
+					})
+					http.Error(w, errMsg, http.StatusUnprocessableEntity)
+					return
+				}
+			}
+
+			// ── Increment attempt counter before calling Gmail ────────────────────
+			nextAttempts := task.SendAttempts + 1
+
 			gmailService, gmailErr := gmail.NewService(ctx, option.WithTokenSource(ts))
 			if gmailErr != nil {
 				slog.Error("handlers: failed to initialize gmail service", "error", gmailErr)
@@ -963,61 +1041,137 @@ func (h *AuthHandler) HandleTaskExecuteCard(w http.ResponseWriter, r *http.Reque
 
 			_, sendErr := gmailService.Users.Drafts.Send("me", &gmail.Draft{Id: task.ActionCard.DraftID}).Context(ctx).Do()
 			if sendErr != nil {
-				slog.Error("handlers: failed to send gmail draft", "draftId", task.ActionCard.DraftID, "error", sendErr)
-				http.Error(w, fmt.Sprintf("failed to send gmail draft: %v", sendErr), http.StatusInternalServerError)
+				isFinal := nextAttempts >= maxSendAttempts
+				errMsg := fmt.Sprintf("attempt %d/%d: %v", nextAttempts, maxSendAttempts, sendErr)
+
+				slog.Error("handlers: failed to send gmail draft",
+					"draftId", task.ActionCard.DraftID,
+					"attempt", nextAttempts,
+					"isFinal", isFinal,
+					"error", sendErr,
+				)
+
+				// Persist failure details in Convex
+				_ = h.convex.CallMutation(ctx, "mutations:recordTaskError", map[string]interface{}{
+					"taskId":       taskId,
+					"errorMessage": errMsg,
+					"sendAttempts": float64(nextAttempts),
+					"isFinal":      isFinal,
+				}, nil)
+
+				if isFinal {
+					// Broadcast a dashboard error event so the UI shows an error badge
+					// without requiring a page refresh.
+					h.broker.Broadcast(userId, sse.Event{
+						Type: "TASK_SEND_FAILED",
+						Data: map[string]interface{}{
+							"taskId":   taskId,
+							"title":    task.Title,
+							"error":    fmt.Sprintf("Email permanently failed after %d attempts. Last error: %v", maxSendAttempts, sendErr),
+							"attempts": nextAttempts,
+						},
+					})
+					http.Error(w,
+						fmt.Sprintf("email send failed after %d attempts and will not be retried: %v", maxSendAttempts, sendErr),
+						http.StatusConflict,
+					)
+				} else {
+					http.Error(w,
+						fmt.Sprintf("email send failed (attempt %d/%d), please try again: %v", nextAttempts, maxSendAttempts, sendErr),
+						http.StatusInternalServerError,
+					)
+				}
 				return
 			}
 			slog.Info("handlers: gmail draft sent successfully", "taskId", taskId, "draftId", task.ActionCard.DraftID)
 
 		case "CALENDAR_BOOKING":
-			// Find active schedules for this task
-			var schedules []Schedule
-			err = h.convex.CallQuery(ctx, "queries:getActiveSchedules", map[string]interface{}{
-				"userId": userId,
-			}, &schedules)
-			if err != nil {
-				slog.Error("handlers: failed to retrieve schedules", "userId", userId, "error", err)
-				http.Error(w, "failed to retrieve active schedules", http.StatusInternalServerError)
+			// Parse meeting details from the AI-generated payloadJson.
+			// Expected fields: title, timeSlot ("3:15 PM - 3:45 PM"), date ("Today"), location,
+			// description (meeting agenda/purpose), attendees ([]string of emails)
+			var calPayload struct {
+				Title       string   `json:"title"`
+				TimeSlot    string   `json:"timeSlot"`
+				Date        string   `json:"date"`
+				Location    string   `json:"location"`
+				Description string   `json:"description"`
+				Attendees   []string `json:"attendees"`
+			}
+			if err := json.Unmarshal([]byte(task.ActionCard.PayloadJSON), &calPayload); err != nil {
+				slog.Warn("handlers: could not parse calendar booking payload, using defaults", "taskId", taskId, "error", err)
+			}
+
+			// Resolve title — fall back to task title if the payload didn't carry one.
+			eventTitle := calPayload.Title
+			if eventTitle == "" {
+				eventTitle = task.Title
+			}
+
+			// Resolve location — fall back to editable field sent in request body (if any).
+			eventLocation := calPayload.Location
+			if eventLocation == "" {
+				eventLocation = "Google Meet"
+			}
+
+			// Parse the human-readable date + timeSlot into RFC3339 start/end times.
+			// The AI emits strings like date="Today" and timeSlot="3:15 PM - 3:45 PM".
+			startTime, endTime := parseCalendarSlot(calPayload.Date, calPayload.TimeSlot)
+
+			// Build the Calendar event.
+			calService, calErr := calendar.NewService(ctx, option.WithTokenSource(ts))
+			if calErr != nil {
+				slog.Error("handlers: failed to initialize calendar service for booking", "error", calErr)
+				http.Error(w, "failed to initialize calendar service", http.StatusInternalServerError)
 				return
 			}
 
-			var targetSchedule *Schedule
-			for i := range schedules {
-				if schedules[i].TaskID == taskId {
-					targetSchedule = &schedules[i]
-					break
-				}
+			newEvent := &calendar.Event{
+				Summary:     eventTitle,
+				Location:    eventLocation,
+				Description: calPayload.Description,
+				Start:       &calendar.EventDateTime{DateTime: startTime.Format(time.RFC3339), TimeZone: "UTC"},
+				End:         &calendar.EventDateTime{DateTime: endTime.Format(time.RFC3339), TimeZone: "UTC"},
 			}
 
-			if targetSchedule == nil {
-				slog.Warn("handlers: no reserved schedule block found for task", "taskId", taskId)
-			} else {
-				calService, calErr := calendar.NewService(ctx, option.WithTokenSource(ts))
-				if calErr != nil {
-					slog.Error("handlers: failed to initialize calendar service", "error", calErr)
-					http.Error(w, "failed to initialize calendar service", http.StatusInternalServerError)
-					return
-				}
-
-				_, patchErr := calService.Events.Patch("primary", targetSchedule.CalendarEventID, &calendar.Event{
-					Status: "confirmed",
-				}).Context(ctx).Do()
-				if patchErr != nil {
-					slog.Error("handlers: failed to confirm event in google calendar", "eventId", targetSchedule.CalendarEventID, "error", patchErr)
-					http.Error(w, fmt.Sprintf("failed to confirm calendar event: %v", patchErr), http.StatusInternalServerError)
-					return
-				}
-
-				// Update schedule status to COMMITTED in Convex
-				err = h.convex.CallMutation(ctx, "mutations:updateScheduleStatus", map[string]interface{}{
-					"scheduleId": targetSchedule.ID,
-					"status":     "COMMITTED",
-				}, nil)
-				if err != nil {
-					slog.Error("handlers: failed to update schedule status in database", "scheduleId", targetSchedule.ID, "error", err)
-				}
-				slog.Info("handlers: calendar booking confirmed successfully", "taskId", taskId, "eventId", targetSchedule.CalendarEventID)
+			// Add attendee emails if provided.
+			for _, email := range calPayload.Attendees {
+				newEvent.Attendees = append(newEvent.Attendees, &calendar.EventAttendee{Email: email})
 			}
+
+			createdEvent, createErr := calService.Events.Insert("primary", newEvent).Context(ctx).Do()
+			if createErr != nil {
+				slog.Error("handlers: failed to create google calendar event", "taskId", taskId, "error", createErr)
+				http.Error(w, fmt.Sprintf("failed to create calendar event: %v", createErr), http.StatusInternalServerError)
+				return
+			}
+
+			slog.Info("handlers: calendar event created successfully",
+				"taskId", taskId,
+				"eventId", createdEvent.Id,
+				"start", startTime,
+				"end", endTime,
+			)
+
+			// Persist the created event in Convex so the schedule row exists for future reference.
+			var scheduleId string
+			err = h.convex.CallMutation(ctx, "mutations:createSchedule", map[string]interface{}{
+				"userId":          userId,
+				"taskId":          taskId,
+				"startTime":       float64(startTime.UnixNano() / int64(time.Millisecond)),
+				"endTime":         float64(endTime.UnixNano() / int64(time.Millisecond)),
+				"allocationType":  "GHOST_BLOCK",
+				"calendarEventId": createdEvent.Id,
+				"status":          "COMMITTED",
+			}, &scheduleId)
+			if err != nil {
+				// Non-fatal: the calendar event was already created. Log and continue.
+				slog.Warn("handlers: calendar event created but failed to persist schedule in db",
+					"taskId", taskId,
+					"eventId", createdEvent.Id,
+					"error", err,
+				)
+			}
+
 
 		case "BILL_PAY":
 			slog.Info("handlers: bill payment card executed", "taskId", taskId)
@@ -1048,5 +1202,67 @@ func (h *AuthHandler) HandleTaskExecuteCard(w http.ResponseWriter, r *http.Reque
 		"status": "success",
 	})
 }
+
+// parseCalendarSlot converts human-readable date and timeSlot strings from the AI
+// triage payload into concrete time.Time values suitable for the Google Calendar API.
+//
+// dateStr examples : "Today", "Tomorrow", "Jun 28", "2026-06-28"
+// slotStr examples : "3:15 PM - 3:45 PM", "14:00 - 14:30"
+//
+// If parsing fails the function returns a best-effort window starting 5 minutes from now.
+func parseCalendarSlot(dateStr, slotStr string) (start, end time.Time) {
+	now := time.Now().UTC()
+
+	// Resolve the date part.
+	var baseDate time.Time
+	switch strings.ToLower(strings.TrimSpace(dateStr)) {
+	case "today", "":
+		baseDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	case "tomorrow":
+		tomorrow := now.AddDate(0, 0, 1)
+		baseDate = time.Date(tomorrow.Year(), tomorrow.Month(), tomorrow.Day(), 0, 0, 0, 0, time.UTC)
+	default:
+		// Try common formats.
+		for _, layout := range []string{"2006-01-02", "Jan 2", "January 2", "Jan 2 2006", "01/02/2006"} {
+			candidate := dateStr
+			if !strings.Contains(candidate, strconv.Itoa(now.Year())) && !strings.Contains(layout, "2006") {
+				candidate = candidate + " " + strconv.Itoa(now.Year())
+				layout = layout + " 2006"
+			}
+			if t, err := time.Parse(layout, candidate); err == nil {
+				baseDate = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+				break
+			}
+		}
+		if baseDate.IsZero() {
+			baseDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		}
+	}
+
+	// Parse start and end time from slotStr (e.g. "3:15 PM - 3:45 PM").
+	parseSlotTime := func(s string) (time.Time, bool) {
+		s = strings.TrimSpace(s)
+		for _, layout := range []string{"3:04 PM", "15:04", "3:04PM", "15:04:05"} {
+			if t, err := time.Parse(layout, s); err == nil {
+				return baseDate.Add(time.Duration(t.Hour())*time.Hour + time.Duration(t.Minute())*time.Minute), true
+			}
+		}
+		return time.Time{}, false
+	}
+
+	parts := strings.SplitN(slotStr, "-", 2)
+	if len(parts) == 2 {
+		startParsed, startOK := parseSlotTime(parts[0])
+		endParsed, endOK := parseSlotTime(parts[1])
+		if startOK && endOK && endParsed.After(startParsed) {
+			return startParsed, endParsed
+		}
+	}
+
+	// Fallback: 5 minutes from now, 30-minute duration.
+	fallbackStart := now.Add(5 * time.Minute)
+	return fallbackStart, fallbackStart.Add(30 * time.Minute)
+}
+
 
 

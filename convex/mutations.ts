@@ -46,6 +46,7 @@ export const ingestTriagedTask = mutation({
         payloadJson: v.string(),
       })
     ),
+    externalTaskId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     return await ctx.db.insert("tasks", {
@@ -57,6 +58,7 @@ export const ingestTriagedTask = mutation({
       durationMinutes: args.durationMinutes,
       dueAt: args.dueAt,
       actionCard: args.actionCard,
+      externalTaskId: args.externalTaskId,
     });
   },
 });
@@ -246,6 +248,34 @@ export const updateTaskStatus = mutation({
   },
 });
 
+// Creates a new committed schedule record after a calendar event is created
+export const createSchedule = mutation({
+  args: {
+    userId: v.id("users"),
+    taskId: v.id("tasks"),
+    startTime: v.number(),
+    endTime: v.number(),
+    allocationType: v.union(v.literal("GHOST_BLOCK"), v.literal("MICRO_GAP")),
+    calendarEventId: v.string(),
+    status: v.union(
+      v.literal("RESERVED"),
+      v.literal("DISSOLVED"),
+      v.literal("COMMITTED")
+    ),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("schedules", {
+      userId: args.userId,
+      taskId: args.taskId,
+      startTime: args.startTime,
+      endTime: args.endTime,
+      allocationType: args.allocationType,
+      calendarEventId: args.calendarEventId,
+      status: args.status,
+    });
+  },
+});
+
 // Updates the status of a schedule allocation
 export const updateScheduleStatus = mutation({
   args: {
@@ -263,3 +293,26 @@ export const updateScheduleStatus = mutation({
   },
 });
 
+// Records a Gmail send failure against a task.
+// When isFinal=true (3rd attempt exhausted) the task is marked IGNORED so
+// the dashboard surfaces it as a permanently-failed card instead of an
+// actionable item. The raw error message is stored for the UI to display.
+export const recordTaskError = mutation({
+  args: {
+    taskId: v.id("tasks"),
+    errorMessage: v.string(),
+    sendAttempts: v.number(),
+    isFinal: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const patch: Record<string, unknown> = {
+      sendAttempts: args.sendAttempts,
+      lastError: args.errorMessage,
+    };
+    if (args.isFinal) {
+      patch.errorStatus = "SEND_FAILED";
+      patch.status = "IGNORED"; // Remove from active queue; UI reads errorStatus to show the error badge
+    }
+    await ctx.db.patch(args.taskId, patch);
+  },
+});

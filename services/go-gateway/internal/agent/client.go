@@ -10,9 +10,12 @@ import (
 
 	schedulerv1 "github.com/lastminutelifesaver/gateway/gen/scheduler/v1"
 	triagev1 "github.com/lastminutelifesaver/gateway/gen/triage/v1"
+	"golang.org/x/oauth2"
+	"google.golang.org/api/idtoken"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 // AgentClient defines the contract for communicating with the Python reasoning agent.
@@ -27,6 +30,7 @@ type Client struct {
 	conn         *grpc.ClientConn
 	triageClient triagev1.TriageServiceClient
 	schedClient  schedulerv1.SchedulerServiceClient
+	tokenSource  oauth2.TokenSource
 }
 
 var (
@@ -47,10 +51,25 @@ func GetClient() (AgentClient, error) {
 		// Use TLS for Cloud Run hosts (any non-localhost address).
 		// Cloud Run requires TLS; insecure is only safe for local dev.
 		var creds grpc.DialOption
+		var tokenSource oauth2.TokenSource
 		if strings.HasPrefix(addr, "localhost") || strings.HasPrefix(addr, "127.0.0.1") {
 			creds = grpc.WithTransportCredentials(insecure.NewCredentials())
 		} else {
 			creds = grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, ""))
+
+			// Construct OIDC audience: remove port if present, prefix with https://
+			host := addr
+			if idx := strings.Index(addr, ":"); idx != -1 {
+				host = addr[:idx]
+			}
+			audience := "https://" + host
+			ts, err := idtoken.NewTokenSource(context.Background(), audience)
+			if err != nil {
+				slog.Error("agent/client: failed to create OIDC token source", "audience", audience, "error", err)
+			} else {
+				tokenSource = ts
+				slog.Info("agent/client: configured OIDC token authentication for gRPC", "audience", audience)
+			}
 		}
 
 		conn, err := grpc.NewClient(addr, creds)
@@ -62,6 +81,7 @@ func GetClient() (AgentClient, error) {
 			conn:         conn,
 			triageClient: triagev1.NewTriageServiceClient(conn),
 			schedClient:  schedulerv1.NewSchedulerServiceClient(conn),
+			tokenSource:  tokenSource,
 		}
 	})
 	return instance, initErr
@@ -78,6 +98,13 @@ func (c *Client) Close() error {
 
 // ProcessTriage forwards the triage request to the Python agent.
 func (c *Client) ProcessTriage(ctx context.Context, req *triagev1.ProcessTriageRequest) (*triagev1.ProcessTriageResponse, error) {
+	if c.tokenSource != nil {
+		tok, err := c.tokenSource.Token()
+		if err != nil {
+			return nil, fmt.Errorf("agent/client: failed to get OIDC token: %w", err)
+		}
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+tok.AccessToken)
+	}
 	resp, err := c.triageClient.ProcessTriage(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("agent/client: ProcessTriage failed: %w", err)
@@ -87,6 +114,13 @@ func (c *Client) ProcessTriage(ctx context.Context, req *triagev1.ProcessTriageR
 
 // MatchSchedule forwards the schedule matching request to the Python agent.
 func (c *Client) MatchSchedule(ctx context.Context, req *schedulerv1.MatchScheduleRequest) (*schedulerv1.MatchScheduleResponse, error) {
+	if c.tokenSource != nil {
+		tok, err := c.tokenSource.Token()
+		if err != nil {
+			return nil, fmt.Errorf("agent/client: failed to get OIDC token: %w", err)
+		}
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+tok.AccessToken)
+	}
 	resp, err := c.schedClient.MatchSchedule(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("agent/client: MatchSchedule failed: %w", err)

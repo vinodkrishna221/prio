@@ -1,0 +1,33 @@
+========================================================================
+TEST EMAIL 3: BILL PAYMENT GENERATION (BILL_PAY)
+========================================================================
+
+Purpose:
+Tests if the system correctly detects a utility bill or invoice, extracts the
+vendor name, amount, and due date, and renders a 1-Tap Bill Payment Action Card.
+
+------------------------------------------------------------------------
+SUBJECT:
+------------------------------------------------------------------------
+Your Comcast Internet Statement is Ready - Account #849920192
+
+------------------------------------------------------------------------
+BODY:
+------------------------------------------------------------------------
+Dear Customer,
+
+Your monthly statement for Comcast High-Speed Internet service is now available online. 
+
+Account Details:
+- Account Number: 849920192
+- Statement Date: Jun 28, 2026
+- Payment Due Date: Jun 30, 2026
+- Total Amount Due: $75.00
+
+To avoid service disruption or late fees, please pay the balance by the due date. You can pay with your saved payment method by visiting your online account or clicking the instant payment checkout button on your portal.
+
+Thank you for being a valued Comcast customer.
+
+Sincerely,
+Comcast Billing Support
+billing@comcast-billing.com
