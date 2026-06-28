@@ -22,7 +22,8 @@ RUN mkdir -p /app/services/python-agent/protos
 
 # Compile Protobuf schemas
 RUN python -m grpc_tools.protoc -I /app/proto --python_out=/app/services/python-agent/protos --grpc_python_out=/app/services/python-agent/protos /app/proto/triage.proto && \
-    python -m grpc_tools.protoc -I /app/proto --python_out=/app/services/python-agent/protos --grpc_python_out=/app/services/python-agent/protos /app/proto/scheduler.proto
+    python -m grpc_tools.protoc -I /app/proto --python_out=/app/services/python-agent/protos --grpc_python_out=/app/services/python-agent/protos /app/proto/scheduler.proto && \
+    python -m grpc_tools.protoc -I /app/proto --python_out=/app/services/python-agent/protos --grpc_python_out=/app/services/python-agent/protos /app/proto/genome.proto
 
 # =====================================================================
 # Stage 2: Runtime Environment
