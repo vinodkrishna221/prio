@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	genomev1 "github.com/lastminutelifesaver/gateway/gen/genome/v1"
 	triagev1 "github.com/lastminutelifesaver/gateway/gen/triage/v1"
 	"github.com/lastminutelifesaver/gateway/internal/agent"
 	"github.com/lastminutelifesaver/gateway/internal/cache"
@@ -1200,6 +1201,157 @@ func (h *AuthHandler) HandleTaskExecuteCard(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status": "success",
+	})
+}
+
+// BiometricLog represents a biometric log record for Go JSON mapping.
+type BiometricLog struct {
+	ID                  string  `json:"_id"`
+	UserID              string  `json:"userId"`
+	LogDate             string  `json:"logDate"`
+	SleepDurationHours  float64 `json:"sleepDurationHours"`
+	RestingHeartRate    float64 `json:"restingHeartRate"`
+	StepCount           float64 `json:"stepCount"`
+	ComputedEnergyScore float64 `json:"computedEnergyScore"`
+}
+
+// HandleGenerateGenome processes requests to compile a weekly retrospective genome report.
+func (h *AuthHandler) HandleGenerateGenome(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userId, err := h.verifyRequest(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	slog.Info("handlers: generating weekly genome report", "userId", userId)
+
+	// 1. Fetch past week's stats from Convex
+	var weeklyStats struct {
+		Tasks         []Task         `json:"tasks"`
+		Schedules     []Schedule     `json:"schedules"`
+		BiometricLogs []BiometricLog `json:"biometricLogs"`
+	}
+
+	err = h.convex.CallQuery(ctx, "queries:getWeeklyStats", map[string]interface{}{
+		"userId": userId,
+	}, &weeklyStats)
+	if err != nil {
+		slog.Error("handlers: failed to query weekly stats from database", "userId", userId, "error", err)
+		http.Error(w, fmt.Sprintf("database query failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// 2. Map stats into gRPC GenerateGenomeRequest payload
+	var grpcTasks []*genomev1.HistoricalTask
+	for _, t := range weeklyStats.Tasks {
+		var savesMins int32 = 0
+		if t.ActionCard != nil {
+			savesMins = int32(t.ActionCard.SavesMinutes)
+		}
+		grpcTasks = append(grpcTasks, &genomev1.HistoricalTask{
+			TaskId:          t.ID,
+			Title:           t.Title,
+			Source:          t.Source,
+			Status:          t.Status,
+			PriorityScore:   int32(t.PriorityScore),
+			DurationMinutes: int32(t.DurationMinutes),
+			DueAt:           int64(t.DueAt),
+			SavesMinutes:    savesMins,
+		})
+	}
+
+	var grpcSchedules []*genomev1.HistoricalSchedule
+	for _, s := range weeklyStats.Schedules {
+		grpcSchedules = append(grpcSchedules, &genomev1.HistoricalSchedule{
+			ScheduleId:     s.ID,
+			TaskId:         s.TaskID,
+			StartTime:      int64(s.StartTime),
+			EndTime:        int64(s.EndTime),
+			AllocationType: s.AllocationType,
+			Status:         s.Status,
+		})
+	}
+
+	var grpcBiometrics []*genomev1.BiometricLog
+	for _, b := range weeklyStats.BiometricLogs {
+		grpcBiometrics = append(grpcBiometrics, &genomev1.BiometricLog{
+			LogDate:            b.LogDate,
+			SleepDurationHours: float32(b.SleepDurationHours),
+			RestingHeartRate:   int32(b.RestingHeartRate),
+			StepCount:          int32(b.StepCount),
+			ComputedEnergyScore: int32(b.ComputedEnergyScore),
+		})
+	}
+
+	req := &genomev1.GenerateGenomeRequest{
+		UserId:        userId,
+		Tasks:         grpcTasks,
+		Schedules:     grpcSchedules,
+		BiometricLogs: grpcBiometrics,
+	}
+
+	// 3. Invoke gRPC request to Python reasoning service
+	genomeResp, err := h.agentClient.GenerateGenome(ctx, req)
+	if err != nil {
+		slog.Error("handlers: weekly genome gRPC call failed", "userId", userId, "error", err)
+		http.Error(w, fmt.Sprintf("AI genome generation failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// 4. Save compiled genome report back to Convex
+	var insights []map[string]interface{}
+	for _, insight := range genomeResp.Insights {
+		insights = append(insights, map[string]interface{}{
+			"category":    insight.Category,
+			"title":       insight.Title,
+			"description": insight.Description,
+			"impact":      insight.Impact,
+		})
+	}
+
+	weekStartDate := time.Now().AddDate(0, 0, -7).Format("2006-01-02")
+	var newGenomeId string
+	err = h.convex.CallMutation(ctx, "mutations:saveGenome", map[string]interface{}{
+		"userId":            userId,
+		"weekStartDate":     weekStartDate,
+		"deadlineRiskScore": float64(genomeResp.DeadlineRiskScore),
+		"peakHours":         genomeResp.PeakHours,
+		"insights":          insights,
+	}, &newGenomeId)
+	if err != nil {
+		slog.Error("handlers: failed to save weekly genome in database", "userId", userId, "error", err)
+		http.Error(w, fmt.Sprintf("database write failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// 5. Update user scheduling preferences if returned
+	if genomeResp.SchedulingPreferencesJson != "" {
+		err = h.convex.CallMutation(ctx, "mutations:updateUserSchedulingPreferences", map[string]interface{}{
+			"userId":                userId,
+			"schedulingPreferences": genomeResp.SchedulingPreferencesJson,
+		}, nil)
+		if err != nil {
+			slog.Error("handlers: failed to save user scheduling preferences in database", "userId", userId, "error", err)
+		}
+	}
+
+	// 6. Broadcast SSE event
+	h.broker.Broadcast(userId, sse.Event{
+		Type: "GENOME_UPDATED",
+		Data: map[string]interface{}{
+			"userId":            userId,
+			"deadlineRiskScore": genomeResp.DeadlineRiskScore,
+			"genomeId":          newGenomeId,
+		},
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":            "success",
+		"genomeId":          newGenomeId,
+		"deadlineRiskScore": genomeResp.DeadlineRiskScore,
+		"peakHours":         genomeResp.PeakHours,
 	})
 }
 

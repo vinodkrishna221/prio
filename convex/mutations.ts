@@ -331,3 +331,59 @@ export const recordTaskError = mutation({
     await ctx.db.patch(args.taskId, patch);
   },
 });
+
+// Saves a new retrospective genome report
+export const saveGenome = mutation({
+  args: {
+    userId: v.id("users"),
+    weekStartDate: v.string(),
+    deadlineRiskScore: v.number(),
+    peakHours: v.array(v.string()),
+    insights: v.array(
+      v.object({
+        category: v.union(v.literal("ENERGY"), v.literal("FRICTION"), v.literal("SCHEDULE")),
+        title: v.string(),
+        description: v.string(),
+        impact: v.string(),
+      })
+    ),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("genomes")
+      .withIndex("by_user_week", (q) =>
+        q.eq("userId", args.userId).eq("weekStartDate", args.weekStartDate)
+      )
+      .unique();
+
+    if (existing) {
+      await ctx.db.delete(existing._id);
+    }
+
+    return await ctx.db.insert("genomes", {
+      userId: args.userId,
+      weekStartDate: args.weekStartDate,
+      deadlineRiskScore: args.deadlineRiskScore,
+      peakHours: args.peakHours,
+      insights: args.insights,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+// Updates scheduling preferences JSON on the user profile
+export const updateUserSchedulingPreferences = mutation({
+  args: {
+    userId: v.id("users"),
+    schedulingPreferences: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    if (!user) {
+      throw new Error(`updateUserSchedulingPreferences: user ${args.userId} not found`);
+    }
+    await ctx.db.patch(args.userId, {
+      schedulingPreferences: args.schedulingPreferences,
+    });
+  },
+});

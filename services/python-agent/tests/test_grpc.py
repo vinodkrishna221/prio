@@ -29,7 +29,7 @@ def grpc_server():
 
 
 def test_grpc_triage_service(grpc_server) -> None:
-    # Mock Gemini model response to return HIGH effort
+    mock_client = MagicMock()
     mock_response = MagicMock()
     mock_response.text = json.dumps({
         "triage_priority_score": 90,
@@ -39,9 +39,9 @@ def test_grpc_triage_service(grpc_server) -> None:
         "friction_saved_minutes": "15",
         "cognitive_effort": "HIGH"
     })
+    mock_client.models.generate_content.return_value = mock_response
     
-    with patch("agents.triage_agent.GenerativeModel") as mock_model_cls:
-        mock_model_cls.return_value.generate_content.return_value = mock_response
+    with patch("agents.triage_agent.get_genai_client", return_value=mock_client):
         
         with grpc.insecure_channel(grpc_server) as channel:
             stub = triage_pb2_grpc.TriageServiceStub(channel)

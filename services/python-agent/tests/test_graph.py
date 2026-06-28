@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import pytest
 from unittest.mock import MagicMock, patch
 
 # Add project root and protos directory to sys.path for test run execution
@@ -9,7 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../p
 
 from agents.graph import triage_graph, scheduler_graph
 from agents.state import TriageState, SchedulerState
-from agents.triage_agent import triage_agent_node, init_vertex_ai
+from agents.triage_agent import triage_agent_node, get_genai_client
 
 def test_triage_graph_traversal() -> None:
     """
@@ -35,6 +36,7 @@ def test_triage_graph_traversal() -> None:
     }
     
     # Mock Gemini model response to return HIGH effort
+    mock_client = MagicMock()
     mock_response = MagicMock()
     mock_response.text = json.dumps({
         "triage_priority_score": 90,
@@ -44,15 +46,14 @@ def test_triage_graph_traversal() -> None:
         "friction_saved_minutes": "15",
         "cognitive_effort": "HIGH"
     })
+    mock_client.models.generate_content.return_value = mock_response
     
-    with patch("agents.triage_agent.GenerativeModel") as mock_model_cls:
-        mock_model_cls.return_value.generate_content.return_value = mock_response
-        
+    with patch("agents.triage_agent.get_genai_client", return_value=mock_client):
         # Run graph
         result = triage_graph.invoke(inputs)
         
-        # Verify initial Gemini parsing
-        assert mock_model_cls.called
+        # Verify initial Gemini parsing was called
+        mock_client.models.generate_content.assert_called_once()
         
         # Verify BiometricAgent demoted the HIGH effort task since energy is 3 (<= 4)
         # 90 priority - 20 = 70. Urgency CRITICAL -> QUIET.
@@ -107,28 +108,24 @@ def test_scheduler_graph_traversal() -> None:
         assert allocations[0]["end_time"] == 1719219600 + 30 * 60
 
 
-def test_init_vertex_ai_success() -> None:
-    with patch("agents.triage_agent.vertexai.init") as mock_init, \
+def test_get_genai_client_success() -> None:
+    import agents.triage_agent
+    agents.triage_agent._client = None
+    with patch("agents.triage_agent.genai.Client") as mock_client_cls, \
          patch.dict(os.environ, {"GCP_PROJECT": "test-project", "GCP_LOCATION": "test-loc"}):
-        import agents.triage_agent
-        agents.triage_agent._vertex_ai_initialized = False
         
-        init_vertex_ai()
+        client = get_genai_client()
         
-        mock_init.assert_called_once_with(project="test-project", location="test-loc")
-        assert agents.triage_agent._vertex_ai_initialized is True
+        mock_client_cls.assert_called_once_with(vertexai=True, project="test-project", location="test-loc")
+        assert client == mock_client_cls.return_value
 
 
-def test_init_vertex_ai_failure() -> None:
-    with patch("agents.triage_agent.vertexai.init", side_effect=ValueError("Init failed")) as mock_init, \
-         patch.dict(os.environ, {"GCP_PROJECT": "test-project"}):
-        import agents.triage_agent
-        agents.triage_agent._vertex_ai_initialized = False
-        
-        init_vertex_ai()
-        
-        mock_init.assert_called_once()
-        assert agents.triage_agent._vertex_ai_initialized is False
+def test_get_genai_client_failure() -> None:
+    import agents.triage_agent
+    agents.triage_agent._client = None
+    with patch.dict(os.environ, {}, clear=True):
+        with pytest.raises(ValueError, match="GCP_PROJECT or PROJECT_ID environment variable is not set"):
+            get_genai_client()
 
 
 def test_triage_agent_fallback_on_exception() -> None:
@@ -151,9 +148,9 @@ def test_triage_agent_fallback_on_exception() -> None:
         "task_id": ""
     }
     
-    with patch("agents.triage_agent.GenerativeModel") as mock_model_cls:
+    with patch("agents.triage_agent.get_genai_client") as mock_get_client:
         # Force generate_content to raise an error
-        mock_model_cls.return_value.generate_content.side_effect = Exception("Vertex AI error")
+        mock_get_client.return_value.models.generate_content.side_effect = Exception("Vertex AI error")
         
         result = triage_agent_node(inputs)
         

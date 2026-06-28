@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package genome.v1;
+
+option go_package = "github.com/lastminutelifesaver/gateway/gen/genome/v1;genomev1";
+
+service GenomeService {
+  rpc GenerateGenome(GenerateGenomeRequest) returns (GenerateGenomeResponse);
+}
+
+message GenerateGenomeRequest {
+  string user_id = 1;
+  repeated HistoricalTask tasks = 2;
+  repeated HistoricalSchedule schedules = 3;
+  repeated BiometricLog biometric_logs = 4;
+}
+
+message HistoricalTask {
+  string task_id = 1;
+  string title = 2;
+  string source = 3;
+  string status = 4;
+  int32 priority_score = 5;
+  int32 duration_minutes = 6;
+  int64 due_at = 7;
+  int32 saves_minutes = 8;
+}
+
+message HistoricalSchedule {
+  string schedule_id = 1;
+  string task_id = 2;
+  int64 start_time = 3;
+  int64 end_time = 4;
+  string allocation_type = 5;
+  string status = 6;
+}
+
+message BiometricLog {
+  string log_date = 1;
+  float sleep_duration_hours = 2;
+  int32 resting_heart_rate = 3;
+  int32 step_count = 4;
+  int32 computed_energy_score = 5;
+}
+
+message GenerateGenomeResponse {
+  int32 deadline_risk_score = 1;
+  repeated string peak_hours = 2;
+  repeated InsightCard insights = 3;
+  string scheduling_preferences_json = 4;
+}
+
+message InsightCard {
+  string category = 1; // "ENERGY", "FRICTION", "SCHEDULE"
+  string title = 2;
+  string description = 3;
+  string impact = 4;
+}

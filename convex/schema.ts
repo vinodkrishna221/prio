@@ -10,6 +10,8 @@ export default defineSchema({
     energyLastUpdated: v.number(),
     // Onboarding tour — optional so existing rows are unaffected (no migration needed)
     completedTour: v.optional(v.boolean()),
+    // Weekly scheduling preferences derived from genome insights
+    schedulingPreferences: v.optional(v.string()),
   }).index("by_email", ["email"]),
 
   // Tasks Collection
@@ -87,4 +89,23 @@ export default defineSchema({
     lastSyncCursor: v.optional(v.string()),
     watchExpiration: v.number(),
   }).index("by_user_provider", ["userId", "provider"]),
+
+  // Retrospective Genome reports
+  genomes: defineTable({
+    userId: v.id("users"),
+    weekStartDate: v.string(), // ISO format: YYYY-MM-DD
+    deadlineRiskScore: v.number(),
+    peakHours: v.array(v.string()),
+    insights: v.array(
+      v.object({
+        category: v.union(v.literal("ENERGY"), v.literal("FRICTION"), v.literal("SCHEDULE")),
+        title: v.string(),
+        description: v.string(),
+        impact: v.string(),
+      })
+    ),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_week", ["userId", "weekStartDate"]),
 });

@@ -227,6 +227,9 @@ func main() {
 	// Biological energy state update endpoint
 	mux.HandleFunc("/api/user/energy-state", authHandler.HandleEnergyState)
 
+	// Weekly retrospective genome generation endpoint
+	mux.HandleFunc("POST /api/user/genome", authHandler.HandleGenerateGenome)
+
 	// Wrap the mux with CORS middleware so the browser frontend can reach the gateway.
 	corsHandler := corsMiddleware(dashboardURL, mux)
 

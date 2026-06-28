@@ -17,8 +17,11 @@ import protos.triage_pb2 as triage_pb2
 import protos.triage_pb2_grpc as triage_pb2_grpc
 import protos.scheduler_pb2 as scheduler_pb2
 import protos.scheduler_pb2_grpc as scheduler_pb2_grpc
+import protos.genome_pb2 as genome_pb2
+import protos.genome_pb2_grpc as genome_pb2_grpc
 
 from agents.graph import triage_graph, scheduler_graph
+from agents.genome_analyst import analyze_weekly_genome
 
 logger = structlog.get_logger()
 
@@ -123,6 +126,73 @@ class SchedulerServiceHandler(scheduler_pb2_grpc.SchedulerServiceServicer):
             return scheduler_pb2.MatchScheduleResponse()
 
 
+class GenomeServiceHandler(genome_pb2_grpc.GenomeServiceServicer):
+    def GenerateGenome(
+        self,
+        request: genome_pb2.GenerateGenomeRequest,
+        context: grpc.ServicerContext
+    ) -> genome_pb2.GenerateGenomeResponse:
+        logger.info("grpc.generate_genome.received", user_id=request.user_id)
+        try:
+            tasks = []
+            for t in request.tasks:
+                tasks.append({
+                    "task_id": t.task_id,
+                    "title": t.title,
+                    "source": t.source,
+                    "status": t.status,
+                    "priority_score": t.priority_score,
+                    "duration_minutes": t.duration_minutes,
+                    "due_at": t.due_at,
+                    "saves_minutes": t.saves_minutes,
+                })
+
+            schedules = []
+            for s in request.schedules:
+                schedules.append({
+                    "schedule_id": s.schedule_id,
+                    "task_id": s.task_id,
+                    "start_time": s.start_time,
+                    "end_time": s.end_time,
+                    "allocation_type": s.allocation_type,
+                    "status": s.status,
+                })
+
+            biometrics = []
+            for b in request.biometric_logs:
+                biometrics.append({
+                    "log_date": b.log_date,
+                    "sleep_duration_hours": b.sleep_duration_hours,
+                    "resting_heart_rate": b.resting_heart_rate,
+                    "step_count": b.step_count,
+                    "computed_energy_score": b.computed_energy_score,
+                })
+
+            result = analyze_weekly_genome(tasks, schedules, biometrics)
+
+            insights_proto = []
+            for insight in result.get("insights", []):
+                insights_proto.append(genome_pb2.InsightCard(
+                    category=insight["category"],
+                    title=insight["title"],
+                    description=insight["description"],
+                    impact=insight["impact"]
+                ))
+
+            logger.info("grpc.generate_genome.success", user_id=request.user_id)
+            return genome_pb2.GenerateGenomeResponse(
+                deadline_risk_score=result.get("deadline_risk_score", 50),
+                peak_hours=result.get("peak_hours", []),
+                insights=insights_proto,
+                scheduling_preferences_json=result.get("scheduling_preferences_json", "{}")
+            )
+        except Exception as e:
+            logger.error("grpc.generate_genome.failed", error=str(e), user_id=request.user_id)
+            context.set_details(f"Genome generation failed: {str(e)}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            return genome_pb2.GenerateGenomeResponse()
+
+
 def serve() -> None:
     port = os.environ.get("PORT", "50051")
     server = grpc.server(concurrent.futures.ThreadPoolExecutor(max_workers=10))
@@ -130,6 +200,7 @@ def serve() -> None:
     # Register our services
     triage_pb2_grpc.add_TriageServiceServicer_to_server(TriageServiceHandler(), server)
     scheduler_pb2_grpc.add_SchedulerServiceServicer_to_server(SchedulerServiceHandler(), server)
+    genome_pb2_grpc.add_GenomeServiceServicer_to_server(GenomeServiceHandler(), server)
     
     # Register standard health check servicer
     health_servicer = health.HealthServicer()
@@ -139,6 +210,7 @@ def serve() -> None:
     health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
     health_servicer.set("triage.v1.TriageService", health_pb2.HealthCheckResponse.SERVING)
     health_servicer.set("scheduler.v1.SchedulerService", health_pb2.HealthCheckResponse.SERVING)
+    health_servicer.set("genome.v1.GenomeService", health_pb2.HealthCheckResponse.SERVING)
     
     server.add_insecure_port(f"[::]:{port}")
     logger.info("grpc_server.starting", port=port)

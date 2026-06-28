@@ -5,11 +5,13 @@
 	import { useActiveSchedules } from '$lib/convex/useActiveSchedules';
 	import { useFrictionSaved } from '$lib/convex/useFrictionSaved';
 	import { useCurrentUser } from '$lib/convex/useCurrentUser';
+	import { useLatestGenome } from '$lib/convex/useLatestGenome';
 	import { client } from '$lib/convex/client';
 	import { api } from '../../../../../convex/_generated/api';
 	import ActionCard from '$lib/components/cards/ActionCard.svelte';
 	import CalendarView from './CalendarView.svelte';
 	import DashboardTour from '$lib/components/onboarding/DashboardTour.svelte';
+	import ProductivityGenome from '$lib/components/ProductivityGenome.svelte';
 
 	let { data } = $props<{ data: { user: { id: string }; sseToken?: string } }>();
 	let userId = $derived(data.user?.id || '');
@@ -22,6 +24,7 @@
 	let schedulesList = $state<any[]>([]);
 	let userProfile = $state<{ completedTour?: boolean } | null>(null);
 	let frictionSaved = $state({ completed: 0, active: 0, total: 0 });
+	let latestGenome = $state<any | null>(null);
 
 	$effect(() => {
 		if (userId) {
@@ -29,6 +32,7 @@
 			const schedulesStore = useActiveSchedules(userId);
 			const frictionStore = useFrictionSaved(userId);
 			const userStore = useCurrentUser(userId);
+			const genomeStore = useLatestGenome(userId);
 			
 			const unsubTasks = tasksStore.subscribe(val => {
 				tasksList = val;
@@ -42,16 +46,21 @@
 			const unsubUser = userStore.subscribe(val => {
 				userProfile = val;
 			});
+			const unsubGenome = genomeStore.subscribe(val => {
+				latestGenome = val;
+			});
 
 			return () => {
 				unsubTasks();
 				unsubSchedules();
 				unsubFriction();
 				unsubUser();
+				unsubGenome();
 				tasksStore.destroy();
 				schedulesStore.destroy();
 				frictionStore.destroy();
 				userStore.destroy();
+				genomeStore.destroy();
 			};
 		}
 	});
@@ -148,6 +157,23 @@
 		} finally {
 			isSyncing = false;
 			syncMessage = '';
+		}
+	}
+
+	// Trigger weekly retrospective genome generation via SvelteKit proxy
+	async function generateGenome() {
+		try {
+			const res = await fetch('/proxy/api/user/genome', { method: 'POST' });
+			if (!res.ok) throw new Error('Genome analysis failed');
+			const data = await res.json();
+			addToast(
+				'🧬 Genome Compiled',
+				`Retrospective report compiled successfully. Deadline Risk: ${data.deadlineRiskScore}%.`,
+				'success'
+			);
+		} catch (err: any) {
+			slogError(err);
+			addToast('Analysis Failed', err.message || 'AI genome analysis failed', 'error');
 		}
 	}
 
@@ -347,6 +373,15 @@
 					</span>
 				</div>
 			</div>
+		</div>
+
+		<!-- Productivity Genome Section -->
+		<div class="mb-8">
+			<ProductivityGenome
+				{userId}
+				{latestGenome}
+				onGenerate={generateGenome}
+			/>
 		</div>
 
 		<!-- Main Split Area -->

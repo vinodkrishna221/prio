@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	genomev1 "github.com/lastminutelifesaver/gateway/gen/genome/v1"
 	schedulerv1 "github.com/lastminutelifesaver/gateway/gen/scheduler/v1"
 	triagev1 "github.com/lastminutelifesaver/gateway/gen/triage/v1"
 	"golang.org/x/oauth2"
@@ -22,6 +23,7 @@ import (
 type AgentClient interface {
 	ProcessTriage(ctx context.Context, req *triagev1.ProcessTriageRequest) (*triagev1.ProcessTriageResponse, error)
 	MatchSchedule(ctx context.Context, req *schedulerv1.MatchScheduleRequest) (*schedulerv1.MatchScheduleResponse, error)
+	GenerateGenome(ctx context.Context, req *genomev1.GenerateGenomeRequest) (*genomev1.GenerateGenomeResponse, error)
 	Close() error
 }
 
@@ -30,6 +32,7 @@ type Client struct {
 	conn         *grpc.ClientConn
 	triageClient triagev1.TriageServiceClient
 	schedClient  schedulerv1.SchedulerServiceClient
+	genomeClient genomev1.GenomeServiceClient
 	tokenSource  oauth2.TokenSource
 }
 
@@ -81,6 +84,7 @@ func GetClient() (AgentClient, error) {
 			conn:         conn,
 			triageClient: triagev1.NewTriageServiceClient(conn),
 			schedClient:  schedulerv1.NewSchedulerServiceClient(conn),
+			genomeClient: genomev1.NewGenomeServiceClient(conn),
 			tokenSource:  tokenSource,
 		}
 	})
@@ -124,6 +128,22 @@ func (c *Client) MatchSchedule(ctx context.Context, req *schedulerv1.MatchSchedu
 	resp, err := c.schedClient.MatchSchedule(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("agent/client: MatchSchedule failed: %w", err)
+	}
+	return resp, nil
+}
+
+// GenerateGenome forwards the genome generation request to the Python agent.
+func (c *Client) GenerateGenome(ctx context.Context, req *genomev1.GenerateGenomeRequest) (*genomev1.GenerateGenomeResponse, error) {
+	if c.tokenSource != nil {
+		tok, err := c.tokenSource.Token()
+		if err != nil {
+			return nil, fmt.Errorf("agent/client: failed to get OIDC token: %w", err)
+		}
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+tok.AccessToken)
+	}
+	resp, err := c.genomeClient.GenerateGenome(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("agent/client: GenerateGenome failed: %w", err)
 	}
 	return resp, nil
 }

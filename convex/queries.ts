@@ -96,3 +96,51 @@ export const getFrictionSaved = query({
   },
 });
 
+// Fetches the most recent retrospective genome report for the user
+export const getLatestGenome = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("genomes")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .order("desc")
+      .first();
+  },
+});
+
+// Gathers tasks, schedules, and biometric logs for the last 7 days
+export const getWeeklyStats = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+    // 1. Fetch recent tasks
+    const allTasks = await ctx.db
+      .query("tasks")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .collect();
+    const tasks = allTasks.filter((t) => t.dueAt >= sevenDaysAgo || t.status === "ACTIVE" || t.status === "COMPLETED");
+
+    // 2. Fetch recent schedules
+    const allSchedules = await ctx.db
+      .query("schedules")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .collect();
+    const schedules = allSchedules.filter((s) => s.startTime >= sevenDaysAgo);
+
+    // 3. Fetch recent biometric logs (last 7 days)
+    const allBiometrics = await ctx.db
+      .query("biometric_logs")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .collect();
+    const dateLimitStr = new Date(sevenDaysAgo).toISOString().split("T")[0];
+    const biometricLogs = allBiometrics.filter((b) => b.logDate >= dateLimitStr);
+
+    return {
+      tasks,
+      schedules,
+      biometricLogs,
+    };
+  },
+});
+
