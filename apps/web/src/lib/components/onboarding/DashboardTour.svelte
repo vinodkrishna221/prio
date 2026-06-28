@@ -262,9 +262,11 @@
 	});
 
 	onDestroy(() => {
-		window.removeEventListener('keydown', handleKeydown);
+		if (typeof window !== 'undefined') {
+			window.removeEventListener('keydown', handleKeydown);
+			if (rafId) cancelAnimationFrame(rafId);
+		}
 		resizeObserver?.disconnect();
-		if (rafId) cancelAnimationFrame(rafId);
 	});
 </script>
 
