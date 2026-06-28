@@ -14,6 +14,21 @@ export const createUser = mutation({
   },
 });
 
+// Marks the onboarding tour as completed for the given user.
+// Safe to call multiple times — subsequent calls are idempotent no-ops.
+export const completeUserTour = mutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    if (!user) {
+      throw new Error(`completeUserTour: user ${args.userId} not found`);
+    }
+    await ctx.db.patch(args.userId, { completedTour: true });
+  },
+});
+
+
+
 // Returns the user with matching email, or null
 export const getUserByEmail = query({
   args: { email: v.string() },

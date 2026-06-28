@@ -1,6 +1,17 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
 
+// Fetches a user record by its Convex document ID.
+// Used by the dashboard to reactively subscribe to the completedTour flag.
+export const getUserById = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.userId);
+  },
+});
+
+
+
 // Fetches the real-time active task cards sorted by priority
 export const getActiveTasks = query({
   args: { userId: v.id("users") },

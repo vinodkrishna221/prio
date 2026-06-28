@@ -4,8 +4,12 @@
 	import { useActiveTasks } from '$lib/convex/useActiveTasks';
 	import { useActiveSchedules } from '$lib/convex/useActiveSchedules';
 	import { useFrictionSaved } from '$lib/convex/useFrictionSaved';
+	import { useCurrentUser } from '$lib/convex/useCurrentUser';
+	import { client } from '$lib/convex/client';
+	import { api } from '../../../../../convex/_generated/api';
 	import ActionCard from '$lib/components/cards/ActionCard.svelte';
 	import CalendarView from './CalendarView.svelte';
+	import DashboardTour from '$lib/components/onboarding/DashboardTour.svelte';
 
 	let { data } = $props<{ data: { user: { id: string }; sseToken?: string } }>();
 	let userId = $derived(data.user?.id || '');
@@ -16,6 +20,7 @@
 	// Subscriptions to Convex reactive stores via Svelte 5 $effect
 	let tasksList = $state<any[]>([]);
 	let schedulesList = $state<any[]>([]);
+	let userProfile = $state<{ completedTour?: boolean } | null>(null);
 	let frictionSaved = $state({ completed: 0, active: 0, total: 0 });
 
 	$effect(() => {
@@ -23,6 +28,7 @@
 			const tasksStore = useActiveTasks(userId);
 			const schedulesStore = useActiveSchedules(userId);
 			const frictionStore = useFrictionSaved(userId);
+			const userStore = useCurrentUser(userId);
 			
 			const unsubTasks = tasksStore.subscribe(val => {
 				tasksList = val;
@@ -33,14 +39,19 @@
 			const unsubFriction = frictionStore.subscribe(val => {
 				frictionSaved = val;
 			});
+			const unsubUser = userStore.subscribe(val => {
+				userProfile = val;
+			});
 
 			return () => {
 				unsubTasks();
 				unsubSchedules();
 				unsubFriction();
+				unsubUser();
 				tasksStore.destroy();
 				schedulesStore.destroy();
 				frictionStore.destroy();
+				userStore.destroy();
 			};
 		}
 	});
@@ -50,6 +61,30 @@
 	let isSyncing = $state(false);
 	let syncMessage = $state('');
 	let sseConnected = $state(false);
+
+	// ─── Onboarding Tour ─────────────────────────────────────────────────────────
+	let tourRef = $state<ReturnType<typeof DashboardTour> | null>(null);
+	let tourStarted = $state(false);
+
+	// Watch userProfile — once loaded, auto-start tour for first-time visitors
+	$effect(() => {
+		if (!tourStarted && userProfile !== null && !userProfile.completedTour) {
+			tourStarted = true;
+			// 800ms delay so the page fully paints before the spotlight appears
+			setTimeout(() => {
+				tourRef?.startTour();
+			}, 800);
+		}
+	});
+
+	// Called by the tour component when the user finishes or skips
+	async function handleTourComplete() {
+		try {
+			await client.mutation(api.mutations.completeUserTour, { userId: userId as any });
+		} catch (err) {
+			slogError(err);
+		}
+	}
 
 	interface Toast {
 		id: string;
@@ -278,8 +313,8 @@
 				</div>
 			</div>
 
-			<!-- Quick stats card -->
-			<div class="rounded-2xl border border-white/5 bg-brand-card p-6 shadow-lg backdrop-blur-md flex flex-col justify-between">
+			<!-- Quick stats card —— id used by the onboarding tour spotlight -->
+			<div id="friction-stat-card" class="rounded-2xl border border-white/5 bg-brand-card p-6 shadow-lg backdrop-blur-md flex flex-col justify-between">
 				<div>
 					<h3 class="text-sm font-semibold text-brand-textMuted uppercase tracking-wider mb-2">
 						Friction Reduction Index
@@ -301,8 +336,8 @@
 
 		<!-- Main Split Area -->
 		<div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-			<!-- Action Card Queue (Left side) -->
-			<section class="lg:col-span-7 flex flex-col gap-6">
+			<!-- Action Card Queue (Left side) — id used by the onboarding tour spotlight -->
+			<section id="actions-queue" class="lg:col-span-7 flex flex-col gap-6">
 				<div class="flex items-center justify-between">
 					<h2 class="text-xl font-bold tracking-tight text-white font-heading">
 						1-Tap Actions Queue ({tasksList.length})
@@ -327,12 +362,15 @@
 				{/if}
 			</section>
 
-			<!-- Calendar View (Right side) -->
-			<section class="lg:col-span-5">
+			<!-- Calendar View (Right side) — id used by the onboarding tour spotlight -->
+			<section id="calendar-view" class="lg:col-span-5">
 				<CalendarView schedules={schedulesList} />
 			</section>
 		</div>
 	</main>
+
+	<!-- ─── Onboarding Tour (renders as a fixed overlay) ────────────────────── -->
+	<DashboardTour bind:this={tourRef} {userId} onComplete={handleTourComplete} />
 
 	<!-- Reactive Glowing Toasts Container -->
 	<div class="fixed bottom-6 right-6 z-50 flex flex-col gap-3 w-full max-w-sm px-4 sm:px-0">

@@ -8,6 +8,8 @@ export default defineSchema({
     createdAt: v.number(),
     currentEnergyScore: v.number(),
     energyLastUpdated: v.number(),
+    // Onboarding tour — optional so existing rows are unaffected (no migration needed)
+    completedTour: v.optional(v.boolean()),
   }).index("by_email", ["email"]),
 
   // Tasks Collection
