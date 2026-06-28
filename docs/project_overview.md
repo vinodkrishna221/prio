@@ -57,6 +57,30 @@ A custom-built, premium onboarding walkthrough. Uses high-contrast backdrop over
 
 ---
 
+## 🌐 Google Tech Stack & Intelligent Integration
+
+We integrated the Google developer ecosystem to build a highly responsive and autonomous agent. Here is what we used and how we utilized it:
+
+### 1. Vertex AI & Gemini 3.5 Flash
+- **Intelligent Structured Outputs**: We configured Gemini to output structured JSON conforming to a strict JSON Schema. This ensures that the generated Gmail draft content, priority score, and target calendar duration are perfectly formatted to map directly to Svelte dashboard UI cards without brittle parser logic.
+- **Contextual Triaging**: The reasoning agent combines workspace context with real-time biometric energy levels in a single-turn prompt to contextually re-draft and rank tasks.
+
+### 2. Google Workspace APIs (Gmail, Calendar, Tasks)
+- **Proactive Gmail Drafting**: The agent writes the drafted reply directly to the user's Gmail Drafts folder in the background. The user can review the draft inside the dashboard and send it with one click.
+- **Real-Time Calendar Orchestration**: Integrates with Google Calendar's free-busy scheduling to detect gaps, create tentative placeholder "Ghost Blocks", and lock them in upon user approval.
+
+### 3. Google Cloud Pub/Sub
+- **Reactive Watch Architecture**: Instead of inefficient API polling, we registered a watch webhook on the user's Gmail inbox. When a new message arrives, Gmail pushes a secure notification to our **Google Cloud Pub/Sub** topic, which routes it instantly to our Go Ingestion Gateway to trigger the LangGraph analysis pipeline under 1 second.
+
+### 4. Google Cloud Tasks
+- **Event-Driven Deferred Scheduling**: When a user schedules a focus slot, we publish a deferred trigger to **Google Cloud Tasks**. When the slot time is reached, Cloud Tasks automatically triggers our webhook to notify the user.
+
+### 5. Cloud Run & Secret Manager
+- **Serverless Scaling**: The polyglot services run as serverless container workloads on **Google Cloud Run** with low memory footings.
+- **Zero-Trust Secrets**: Developer credentials, OAuth Client secrets, and database keys are retrieved dynamically at runtime from **Google Cloud Secret Manager**.
+
+---
+
 ## 🏗️ Decoupled Production-Grade Architecture
 
 Prio is built as a polyglot microservices system:
