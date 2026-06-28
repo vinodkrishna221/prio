@@ -48,7 +48,7 @@ export const getTaskByExternalId = query({
       .query("tasks")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .filter((q) => q.eq(q.field("externalTaskId"), args.externalTaskId))
-      .unique();
+      .first();
   },
 });
 
