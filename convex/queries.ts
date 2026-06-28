@@ -59,3 +59,29 @@ export const getTask = query({
     return await ctx.db.get(args.taskId);
   },
 });
+
+// Calculate total friction saved minutes (realized and potential) for a user
+export const getFrictionSaved = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const tasks = await ctx.db
+      .query("tasks")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .collect();
+
+    const completedSaved = tasks
+      .filter((t) => t.status === "COMPLETED")
+      .reduce((acc, t) => acc + (t.actionCard?.savesMinutes || 0), 0);
+
+    const activeSaved = tasks
+      .filter((t) => t.status === "ACTIVE")
+      .reduce((acc, t) => acc + (t.actionCard?.savesMinutes || 0), 0);
+
+    return {
+      completed: completedSaved,
+      active: activeSaved,
+      total: completedSaved + activeSaved,
+    };
+  },
+});
+

@@ -65,6 +65,7 @@ test.describe('Last-Minute Life Saver E2E Triage & Execution Flow', () => {
 		await page.addInitScript(({ tasks, schedules }) => {
 			(window as any).__MOCK_TASKS__ = tasks;
 			(window as any).__MOCK_SCHEDULES__ = schedules;
+			(window as any).__MOCK_FRICTION_SAVED__ = { completed: 20, active: 15, total: 35 };
 		}, { tasks: mockTasks, schedules: mockSchedules });
 
 		// Route mock Go Gateway execution endpoint

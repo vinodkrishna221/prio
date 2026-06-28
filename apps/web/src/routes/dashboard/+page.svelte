@@ -3,6 +3,7 @@
 	import { env } from '$env/dynamic/public';
 	import { useActiveTasks } from '$lib/convex/useActiveTasks';
 	import { useActiveSchedules } from '$lib/convex/useActiveSchedules';
+	import { useFrictionSaved } from '$lib/convex/useFrictionSaved';
 	import ActionCard from '$lib/components/cards/ActionCard.svelte';
 	import CalendarView from './CalendarView.svelte';
 
@@ -15,11 +16,13 @@
 	// Subscriptions to Convex reactive stores via Svelte 5 $effect
 	let tasksList = $state<any[]>([]);
 	let schedulesList = $state<any[]>([]);
+	let frictionSaved = $state({ completed: 0, active: 0, total: 0 });
 
 	$effect(() => {
 		if (userId) {
 			const tasksStore = useActiveTasks(userId);
 			const schedulesStore = useActiveSchedules(userId);
+			const frictionStore = useFrictionSaved(userId);
 			
 			const unsubTasks = tasksStore.subscribe(val => {
 				tasksList = val;
@@ -27,12 +30,17 @@
 			const unsubSchedules = schedulesStore.subscribe(val => {
 				schedulesList = val;
 			});
+			const unsubFriction = frictionStore.subscribe(val => {
+				frictionSaved = val;
+			});
 
 			return () => {
 				unsubTasks();
 				unsubSchedules();
+				unsubFriction();
 				tasksStore.destroy();
 				schedulesStore.destroy();
+				frictionStore.destroy();
 			};
 		}
 	});
@@ -282,10 +290,10 @@
 				</div>
 				<div class="mt-4">
 					<div class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-brand-success via-emerald-400 to-teal-400 font-heading">
-						⚡ {tasksList.reduce((acc, t) => acc + (t.actionCard?.savesMinutes || 0), 0) + 20} min
+						⚡ {frictionSaved.total} min
 					</div>
 					<span class="text-[10px] text-brand-textMuted/70 font-mono mt-1 block">
-						Based on currently queued cards
+						{frictionSaved.completed}m saved • {frictionSaved.active}m queued
 					</span>
 				</div>
 			</div>
