@@ -1,51 +1,75 @@
-# Project Overview: prio
+# Hackathon Submission Overview: prio
 
-**prio** (previously *The Last-Minute Life Saver*) is a proactive, context-aware AI productivity companion built on a **High Autonomy with 1-Tap Execution** philosophy. Rather than simply alerting the user to an upcoming deadline, the agent runs in the background to pre-compile the required assets and execute the administrative heavy lifting, presenting resolutions to the user as actionable items.
-
----
-
-## 1. Problem Statement
-Traditional task managers (Google Tasks, Todoist, Apple Reminders) are fundamentally passive. They rely on time-based alerts that are easily ignored, leading to:
-- **Task Paralysis**: Stressful major tasks (like tax forms or client agreements) cause users to freeze. A passive notification acts as an external stressor rather than a path to resolution.
-- **Context-Switching Fatigue**: Moving between corporate tools, emails, LMS systems, and personal calendars wastes cognitive energy.
-- **Deadline Blindness**: Busy individuals struggle to visualize tasks in the micro-gaps of their schedules, leading to late payments, missed work, and degraded reliability.
+**prio** is a proactive, context-aware AI productivity companion built on a **High Autonomy with 1-Tap Execution** philosophy. Submitted for the Google Vibe2Ship Hackathon, it shifts the productivity paradigm from passive time-based notifications (which users easily ignore or snooze) to autonomous background triage and single-click administrative resolution.
 
 ---
 
-## 2. Product Vision
-**prio** shifts the paradigm from *reminding* to *resolving*. By integrating deeply with Google Workspace and telemetry sources (e.g., biometrics), the platform:
-1. Triages incoming items in the background.
-2. Drafts resolution actions (e.g., pre-compiles email replies, prepares invoice checkouts).
-3. Allocates target focus slots in the user's Google Calendar.
-4. Renders a unified stream of **1-Tap Action Cards** that the user can approve, edit, or reject in under 5 seconds.
+## 💡 The Core Innovation
+
+Traditional productivity tools are **passive reminders**—they act as external stressors rather than catalysts for resolution. When confronted with complex tasks (e.g., preparing client proposals, resolving billing disputes, or replying to urgent contract emails), users suffer from **cognitive overload** and freeze.
+
+**prio** resolves this by operating as an autonomous, background agent that:
+1. **Triages Incoming Events**: Synthesizes and prioritizes new emails and calendar updates.
+2. **Pre-Compiles Resolutions**: Drafts Gmail responses, pre-populates bill pay forms, and prepares scheduling slots.
+3. **Optimizes Focus Time**: Auto-schedules calendar blocks based on the user's focus availability.
+4. **Delivers 1-Tap Action Cards**: Consolidates all resolutions into a unified dashboard stream where the user merely reviews, modifies, and clicks once to execute the entire background task.
 
 ---
 
-## 3. Core Persona Targets
+## 🛠️ The Tech Innovation Pillars (Why It Wins)
 
-### Alex (20) — The Overwhelmed Student
-- **Job-to-be-Done**: When major papers are due, auto-carve dedicated focus slots and draft outlines so I can start without freezing up.
-- **Value**: Overcomes task paralysis, organizes class assignments, and manages study blocks smoothly.
+### 🧠 Stateful AI Multi-Agent Orchestration (Python + LangGraph + Gemini)
+At the core of the reasoning layer is a stateful Python microservice powered by **LangGraph** and the **Gemini 3.5 Flash** model. Rather than simple single-prompt calls, the AI operates as a graph of specialized agents:
+- **Triage Agent**: Analyzes message content and schedules tasks dynamically.
+- **Drafting Agent**: Auto-generates professional email responses matching past correspondence style.
+- **Schedule Agent**: Carves out focus gaps in calendar events.
 
-### Sarah (32) — The Hectic Professional
-- **Job-to-be-Done**: When client emails arrive during meetings, pre-draft responses based on context and past threads to resolve inside small schedule gaps.
-- **Value**: Meets critical SLAs without getting bogged down in writing standard administrative draft responses.
+### ⚡ Sub-Millisecond Reactive Edge (Convex)
+Prio uses **Convex** as its database and serverless function engine. Instead of standard REST polling or complex WebSockets, Convex sets up a persistent reactive edge. As the Python and Go services update tasks, database mutations instantly recalculate state and stream the new UI down to the client via reactive subscriptions, guaranteeing zero-latency interface updates.
 
-### Marcus (45) — The Busy Consumer
-- **Job-to-be-Done**: When bills or chores are due, check out directly via pre-populated links inside calendar micro-gaps.
-- **Value**: Avoids late fees and manages personal tasks in seconds.
+### 🩺 Biometric & Circadian Rhythm Integration
+Task priorities are not static. The platform computes a real-time **Circadian Energy Score** (1-10) using biometric data logs (sleep duration, step counts, and resting heart rate).
+- **High Energy Score**: prioritizes complex, strategic drafts (e.g., Q3 Client Agreements).
+- **Low Energy Score**: prioritizes low-effort administrative actions (e.g., checking out utility bills).
 
 ---
 
-## 4. Key Features (MoSCoW Matrix)
+## 🚀 Fully Implemented Features
 
-### Must-Haves
-- **Intelligent Ingestion & Triage**: Background email and task parser utilizing Google Workspace webhooks.
-- **Circadian Energy Profiler**: Learns from active biometric scores (computed energy state) to dynamically rank tasks (e.g., low-energy recommends low-effort bills; high-energy unlocks strategic planning).
-- **1-Tap Action Queue**: Seamless action approval and instant execution (e.g., sending the pre-compiled email draft or booking calendar events).
-- **Micro-Gap Focus Calendar**: Carves out tentative placeholder "Ghost Blocks" on the calendar to protect focus time, automatically freeing them if tasks are completed ahead of schedule.
+### 1. 1-Tap Actions Queue
+A beautifully organized card queue sorted dynamically by Priority Score.
+- **Gmail Draft Integration**: Pre-written replies appear directly on the dashboard. One click automatically sends the email via the Gmail API.
+- **Smart Scheduling**: Pre-carved slots can be approved to lock calendar appointments immediately.
 
-### Should-Haves
-- **Friction Reduction Index**: Real-time counter of total minutes saved by delegating chores directly to the agent.
-- **Interactive Onboarding Tour**: Cinematic dark-mode guided walkthrough for new users.
-- **Deferred Retries**: Robust background queuing for email draft execution with retry logic.
+### 2. Circadian Energy Profiler
+An interactive slider representing the user's cognitive state. Adjusting the energy score dynamically triggers the backend engine to re-rank the task priority list and contextually modify agent recommendations in real-time.
+
+### 3. Friction Reduction Index
+A stats dashboard tracking active and realized minutes saved. It aggregates the estimated cognitive time saved by delegating emails, scheduling tasks, and admin payments directly to the agent.
+
+### 4. Micro-Gap Focus Calendar
+A timeline visualizer displaying tentative **Ghost Blocks** (placeholder reservations) created by the agent in open calendar gaps.
+- If a task is resolved or deleted, the system automatically **dissolves** the block to free the calendar slot.
+- Once approved, the block is **committed** and written to Google Calendar.
+
+### 5. Cinematic Onboarding Tour
+A custom-built, premium onboarding walkthrough. Uses high-contrast backdrop overlays (creating a dynamic focus spotlight around active widgets) and spring-physics animated popovers to introduce new users to the interface. Supports complete keyboard accessibility (Escape, Enter, and Arrow keys).
+
+---
+
+## 🏗️ Decoupled Production-Grade Architecture
+
+Prio is built as a polyglot microservices system:
+- **SvelteKit Web Client**: Renders the dark-mode dashboard, integrates the onboarding tour, and handles client SSE connections.
+- **Go Ingestion Gateway**: High-concurrency server handling OAuth 2.0 redirection, syncing Google Workspace API states (Gmail, Calendar, Tasks), and publishing SSE streams.
+- **Python Reasoning Service**: Handles CPU-heavy LangGraph and Vertex AI SDK coordination.
+- **Redis Cache & Google Pub/Sub**: Manages fast workspace context lookups and handles real-time push events from Gmail watch hookups.
+
+---
+
+## 🔒 Enterprise-Grade Security Framework
+
+1. **AES-256-GCM Envelope Encryption**: OAuth tokens are never stored in raw plaintext. The Go Gateway encrypts tokens using AES-GCM prior to database persistence.
+2. **Biometric Privacy Safeguards**: The database persists computed energy scores (0-100) only. Raw biometric telemetry (raw heart rates, exact sleep duration values) is parsed and discarded immediately at the ingest edge.
+3. **Workload Identity Protection**: Production microservices are secured with non-public Cloud Run endpoints, requiring service-to-service credentials and denying public unauthenticated calls.
+
